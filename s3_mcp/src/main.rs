@@ -283,7 +283,7 @@ async fn main() -> std::io::Result<()> {
     let s3_client = Client::new(&aws_config);
     let state = web::Data::new(AppState { s3_client });
 
-    let bind_addr = std::env::var("BIND_ADDR").unwrap_or("0.0.0.0:8081".to_string());
+    let bind_addr = std::env::var("BIND_ADDR").unwrap_or("0.0.0.0:8082".to_string());
     info!("🪣 S3 MCP Service starting on {}", bind_addr);
 
     HttpServer::new(move || {
