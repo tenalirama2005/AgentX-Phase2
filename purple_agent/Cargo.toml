@@ -1,0 +1,59 @@
+[package]
+name = "purple_agent"
+version = "0.2.0"
+edition = "2021"
+description = "FBA Consensus Engine for COBOL→Rust Modernization (arxiv:2507.11768)"
+
+[[bin]]
+name = "purple_agent"
+path = "src/main.rs"
+
+[dependencies]
+# Web server
+actix-web = "4"
+actix-rt = "2"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client (for Claude + Deep Seek V3 API calls)
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Environment variables
+dotenvy = "0.15"
+
+# AWS S3
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1"
+
+# Math / statistics (for Bayesian k* formula)
+libm = "0.2"
+
+# String similarity (for semantic code comparison)
+strsim = "0.11"
+
+# UUID for request tracking
+uuid = { version = "1", features = ["v4"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

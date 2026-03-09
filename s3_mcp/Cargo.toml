@@ -1,0 +1,25 @@
+# S3 MCP Service
+# Handles: fetch_source, fetch_data, save_output, generate_presigned_url, list_objects
+
+[package]
+name = "s3-mcp"
+version = "1.0.0"
+edition = "2021"
+description = "S3 MCP Server for Mainframe Modernization Pipeline"
+
+[[bin]]
+name = "s3-mcp"
+path = "src/main.rs"
+
+[dependencies]
+actix-web = "4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+env_logger = "0.11"
+log = "0.4"
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1"
+aws-credential-types = "1"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }

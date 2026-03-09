@@ -1,0 +1,9 @@
+[workspace]
+resolver = "3"
+
+members = [
+    "green_agent",
+    "purple_agent",
+    "agent_gateway",
+    "s3_mcp",
+]

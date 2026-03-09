@@ -1,0 +1,92 @@
+---
+# Namespace for the Mainframe Modernization Pipeline
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mainframe-modernization
+  labels:
+    app: mainframe-modernization
+    environment: production
+    team: venkat-nagala
+---
+# ServiceAccount for Green Agent (Orchestrator)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: green-agent-sa
+  namespace: mainframe-modernization
+  annotations:
+    # AWS IRSA: bind to IAM role for S3 access (EKS)
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/mainframe-green-agent-role"
+---
+# ServiceAccount for Purple Agent (AI Modernizer)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: purple-agent-sa
+  namespace: mainframe-modernization
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/mainframe-purple-agent-role"
+---
+# ServiceAccount for Agent Gateway
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-gateway-sa
+  namespace: mainframe-modernization
+---
+# Role: Green Agent can only communicate with Agent Gateway
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: green-agent-role
+  namespace: mainframe-modernization
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["pipeline-config"]
+    verbs: ["get", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["green-agent-credentials"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: green-agent-binding
+  namespace: mainframe-modernization
+subjects:
+  - kind: ServiceAccount
+    name: green-agent-sa
+    namespace: mainframe-modernization
+roleRef:
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+  name: green-agent-role
+---
+# Role: Purple Agent permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: purple-agent-role
+  namespace: mainframe-modernization
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["purple-agent-credentials"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: purple-agent-binding
+  namespace: mainframe-modernization
+subjects:
+  - kind: ServiceAccount
+    name: purple-agent-sa
+    namespace: mainframe-modernization
+roleRef:
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+  name: purple-agent-role

@@ -1,0 +1,115 @@
+# Helm values for Mainframe Modernization Pipeline
+# SOLO AI Competition 2026
+# Override with: helm upgrade --install -f values-production.yaml
+
+# ─── Global Settings ──────────────────────────────────────────────────────────
+global:
+  namespace: mainframe-modernization
+  imageRegistry: "venkatnagala"
+  imageTag: "1.0.0"
+  pullPolicy: Always
+
+# ─── Agent Gateway ────────────────────────────────────────────────────────────
+agentGateway:
+  enabled: true
+  replicas: 2
+  image:
+    repository: agent-gateway
+    tag: "1.0.0"
+  service:
+    port: 8090
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+  # Secrets (override with --set or values-secret.yaml)
+  secrets:
+    jwtSecret: "CHANGE_ME"
+    greenAgentApiKey: "CHANGE_ME"
+    purpleAgentApiKey: "CHANGE_ME"
+  mcpServers:
+    s3Url: "http://s3-mcp:8081"
+    geminiUrl: "http://gemini-mcp:8082"
+    cobolUrl: "http://cobol-mcp:8083"
+    rustUrl: "http://rust-mcp:8084"
+
+# ─── Green Agent (Orchestrator) ───────────────────────────────────────────────
+greenAgent:
+  enabled: true
+  replicas: 1
+  image:
+    repository: green-agent
+    tag: "1.0.0"
+  service:
+    port: 8080
+    type: LoadBalancer  # Expose for external API calls
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+  aws:
+    region: "us-east-1"
+    s3Bucket: "mainframe-refactor-lab-venkatnagala"
+    useIRSA: true  # Set false to use secret-based credentials
+  irsaRoleArn: "arn:aws:iam::ACCOUNT_ID:role/mainframe-green-agent-role"
+
+# ─── Purple Agent (AI Modernizer) ─────────────────────────────────────────────
+purpleAgent:
+  enabled: true
+  replicas: 2
+  image:
+    repository: purple-agent
+    tag: "1.0.0"
+  service:
+    port: 8085
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "2000m"
+      memory: "2Gi"
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+  gemini:
+    model: "gemini-2.5-pro"
+    # apiKey set via secret
+
+# ─── Network Policies ─────────────────────────────────────────────────────────
+networkPolicies:
+  enabled: true
+  defaultDenyAll: true  # Zero-trust: deny unless explicitly allowed
+
+# ─── Monitoring ───────────────────────────────────────────────────────────────
+monitoring:
+  enabled: false  # Enable when Prometheus is available
+  serviceMonitor:
+    enabled: false
+    interval: "30s"
+
+# ─── Ingress ──────────────────────────────────────────────────────────────────
+ingress:
+  enabled: false  # Enable for external access to Green Agent
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: mainframe.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: mainframe-tls
+      hosts:
+        - mainframe.example.com

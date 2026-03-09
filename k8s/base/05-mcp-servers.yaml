@@ -1,0 +1,342 @@
+---
+# S3 MCP - AWS S3 Operations
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s3-mcp
+  namespace: mainframe-modernization
+  labels:
+    app: s3-mcp
+    component: mcp-server
+    version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: s3-mcp
+  template:
+    metadata:
+      labels:
+        app: s3-mcp
+        component: mcp-server
+    spec:
+      serviceAccountName: mcp-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: s3-mcp
+          image: tenalirama2026/mainframe-s3-mcp:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8081
+              name: http
+          env:
+            - name: BIND_ADDR
+              value: "0.0.0.0:8081"
+            - name: RUST_LOG
+              value: "info"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: s3-mcp-credentials
+                  key: aws-access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: s3-mcp-credentials
+                  key: aws-secret-access-key
+            - name: AWS_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: s3-mcp-credentials
+                  key: aws-region
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: s3-mcp
+  namespace: mainframe-modernization
+  labels:
+    app: s3-mcp
+spec:
+  selector:
+    app: s3-mcp
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081
+  type: ClusterIP
+---
+# AI MCP - Claude claude-opus-4-6 Translation
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-mcp
+  namespace: mainframe-modernization
+  labels:
+    app: ai-mcp
+    component: mcp-server
+    version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-mcp
+  template:
+    metadata:
+      labels:
+        app: ai-mcp
+        component: mcp-server
+    spec:
+      serviceAccountName: mcp-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: ai-mcp
+          image: tenalirama2026/mainframe-ai-mcp:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8082
+              name: http
+          env:
+            - name: BIND_ADDR
+              value: "0.0.0.0:8082"
+            - name: RUST_LOG
+              value: "info"
+            - name: CLAUDE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-mcp-credentials
+                  key: claude-api-key
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8082
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8082
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-mcp
+  namespace: mainframe-modernization
+  labels:
+    app: ai-mcp
+spec:
+  selector:
+    app: ai-mcp
+  ports:
+    - name: http
+      port: 8082
+      targetPort: 8082
+  type: ClusterIP
+---
+# COBOL MCP - GnuCOBOL Compilation and Execution
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cobol-mcp
+  namespace: mainframe-modernization
+  labels:
+    app: cobol-mcp
+    component: mcp-server
+    version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cobol-mcp
+  template:
+    metadata:
+      labels:
+        app: cobol-mcp
+        component: mcp-server
+    spec:
+      serviceAccountName: mcp-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: cobol-mcp
+          image: tenalirama2026/mainframe-cobol-mcp:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8083
+              name: http
+          env:
+            - name: BIND_ADDR
+              value: "0.0.0.0:8083"
+            - name: RUST_LOG
+              value: "info"
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8083
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8083
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp-cobol
+              mountPath: /tmp/cobol
+      volumes:
+        - name: tmp-cobol
+          emptyDir:
+            sizeLimit: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cobol-mcp
+  namespace: mainframe-modernization
+  labels:
+    app: cobol-mcp
+spec:
+  selector:
+    app: cobol-mcp
+  ports:
+    - name: http
+      port: 8083
+      targetPort: 8083
+  type: ClusterIP
+---
+# Rust MCP - Cargo Compilation and Execution
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rust-mcp
+  namespace: mainframe-modernization
+  labels:
+    app: rust-mcp
+    component: mcp-server
+    version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rust-mcp
+  template:
+    metadata:
+      labels:
+        app: rust-mcp
+        component: mcp-server
+    spec:
+      serviceAccountName: mcp-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: rust-mcp
+          image: tenalirama2026/mainframe-rust-mcp:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8084
+              name: http
+          env:
+            - name: BIND_ADDR
+              value: "0.0.0.0:8084"
+            - name: RUST_LOG
+              value: "info"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8084
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8084
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp-rust
+              mountPath: /tmp/rust_workspace
+      volumes:
+        - name: tmp-rust
+          emptyDir:
+            sizeLimit: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rust-mcp
+  namespace: mainframe-modernization
+  labels:
+    app: rust-mcp
+spec:
+  selector:
+    app: rust-mcp
+  ports:
+    - name: http
+      port: 8084
+      targetPort: 8084
+  type: ClusterIP

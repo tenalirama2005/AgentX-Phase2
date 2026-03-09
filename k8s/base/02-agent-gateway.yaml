@@ -1,0 +1,121 @@
+---
+# Agent Gateway - Authentication & Authorization for all MCP calls
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-gateway
+  namespace: mainframe-modernization
+  labels:
+    app: agent-gateway
+    component: security
+    version: "1.0.0"
+spec:
+  replicas: 2  # HA - 2 replicas for gateway
+  selector:
+    matchLabels:
+      app: agent-gateway
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0  # Zero-downtime deploy
+  template:
+    metadata:
+      labels:
+        app: agent-gateway
+        component: security
+    spec:
+      serviceAccountName: agent-gateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+      containers:
+        - name: agent-gateway
+          image: venkatnagala/agent-gateway:1.0.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8090
+              name: http
+              protocol: TCP
+          env:
+            - name: BIND_ADDR
+              value: "0.0.0.0:8090"
+            - name: RUST_LOG
+              value: "info"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: gateway-jwt-secret
+                  key: jwt-secret
+            - name: GREEN_AGENT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: green-agent-credentials
+                  key: api-key
+            - name: PURPLE_AGENT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: purple-agent-credentials
+                  key: api-key
+            # MCP server URLs (internal cluster DNS)
+            - name: S3_MCP_URL
+              value: "http://s3-mcp:8081"
+            - name: GEMINI_MCP_URL
+              value: "http://gemini-mcp:8082"
+            - name: COBOL_MCP_URL
+              value: "http://cobol-mcp:8083"
+            - name: RUST_MCP_URL
+              value: "http://rust-mcp:8084"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      # Spread across nodes for HA
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: agent-gateway
+                topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-gateway
+  namespace: mainframe-modernization
+  labels:
+    app: agent-gateway
+spec:
+  selector:
+    app: agent-gateway
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+      protocol: TCP
+  type: ClusterIP  # Internal only - agents talk to gateway inside cluster

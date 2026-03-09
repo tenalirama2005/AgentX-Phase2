@@ -1,0 +1,125 @@
+---
+# Zero-Trust Network Policy: Default DENY ALL
+# Only explicitly allowed traffic is permitted
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: mainframe-modernization
+spec:
+  podSelector: {}  # Applies to ALL pods
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Agent Gateway: Accept inbound from Green + Purple agents only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-agents-to-gateway
+  namespace: mainframe-modernization
+spec:
+  podSelector:
+    matchLabels:
+      app: agent-gateway
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              component: orchestrator
+        - podSelector:
+            matchLabels:
+              component: ai-modernizer
+      ports:
+        - port: 8090
+          protocol: TCP
+  egress:
+    # Gateway can reach MCP servers
+    - to:
+        - podSelector:
+            matchLabels:
+              component: mcp-server
+      ports:
+        - port: 8081
+        - port: 8082
+        - port: 8083
+        - port: 8084
+    # DNS
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+---
+# Green Agent: Can ONLY talk to Agent Gateway (not directly to MCPs)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: green-agent-egress
+  namespace: mainframe-modernization
+spec:
+  podSelector:
+    matchLabels:
+      app: green-agent
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Accept requests from external (LoadBalancer/Ingress)
+    - ports:
+        - port: 8080
+  egress:
+    # ONLY to agent-gateway - enforces AuthZ at network level too
+    - to:
+        - podSelector:
+            matchLabels:
+              app: agent-gateway
+      ports:
+        - port: 8090
+    # DNS resolution
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+    # AWS S3/API access (egress to internet)
+    - to: []
+      ports:
+        - port: 443
+---
+# Purple Agent: Can ONLY talk to Agent Gateway
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: purple-agent-egress
+  namespace: mainframe-modernization
+spec:
+  podSelector:
+    matchLabels:
+      app: purple-agent
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: green-agent
+      ports:
+        - port: 8085
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: agent-gateway
+      ports:
+        - port: 8090
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+    # Gemini API
+    - to: []
+      ports:
+        - port: 443
