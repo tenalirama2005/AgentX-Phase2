@@ -1,9 +1,11 @@
 [workspace]
-resolver = "3"
-
 members = [
+    "agent_gateway",
+    "ai_mcp",
+    "cobol_mcp",
     "green_agent",
     "purple_agent",
-    "agent_gateway",
+    "rust_mcp",
     "s3_mcp",
 ]
+resolver = "2"

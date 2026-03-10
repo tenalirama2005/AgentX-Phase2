@@ -1,8 +1,8 @@
 [package]
 name = "purple_agent"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
-description = "FBA Consensus Engine for COBOL→Rust Modernization (arxiv:2507.11768)"
+description = "FBA Consensus Engine — 3-Node (Claude + DeepSeek + Llama) via Nebius (arxiv:2507.11768)"
 
 [[bin]]
 name = "purple_agent"
@@ -16,7 +16,7 @@ actix-rt = "2"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# HTTP client (for Claude + Deep Seek V3 API calls)
+# HTTP client (for Claude + GPT-4o API calls)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
 # Serialization

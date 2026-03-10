@@ -1,199 +1,155 @@
-/// Consensus orchestrator
-/// Ties together Bayesian k* computation, parallel LLM calls,
-/// and FBA quorum intersection into a single pipeline.
-use crate::{
-    bayesian::{compute_k_star, count_cobol_lines, BayesianParams, BayesianResult},
-    claude::call_claude,
-    deepseek_v3::call_deepseek_v3,
-    fba::{run_fba_consensus, FbaConsensusResult, FbaNetwork},
-};
+// FBA Consensus Orchestrator — purple_agent v0.3.0
+// 3-Node FBA: Claude Opus 4.6 + DeepSeek V3.2 + Llama 3.3 70B
+// All via Nebius API (DeepSeek + Llama) and Anthropic API (Claude)
+// arxiv:2507.11768 — k* = Θ(√n × log(1/ε))
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-/// Configuration for the consensus pipeline
-#[derive(Debug, Clone)]
+use crate::bayesian::{compute_k_star, BayesianParams};
+use crate::claude::call_claude;
+use crate::deepseek_v3::call_deepseek;
+use crate::fba::{FbaNetwork, FbaNode, FbaResult};
+use crate::llama::call_llama;
+
+// ─── Consensus Config ─────────────────────────────────────────────────────────
+
 pub struct ConsensusConfig {
-    /// Minimum semantic similarity to accept consensus [0.0, 1.0]
     pub similarity_threshold: f64,
-    /// Minimum confidence score per LLM node [0.0, 1.0]
     pub confidence_threshold: f64,
-    /// Error tolerance ε for k* formula
     pub epsilon: f64,
-    /// Θ scaling constant for k* formula
     pub theta: f64,
 }
 
 impl Default for ConsensusConfig {
     fn default() -> Self {
         Self {
-            similarity_threshold: 0.75,
-            confidence_threshold: 0.85,
-            epsilon: 0.01,
-            theta: 2.5,
+            similarity_threshold: std::env::var("SIMILARITY_THRESHOLD")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.75),
+            confidence_threshold: std::env::var("CONFIDENCE_THRESHOLD")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.85),
+            epsilon: std::env::var("BAYESIAN_EPSILON")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.01),
+            theta: std::env::var("BAYESIAN_THETA")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(2.5),
         }
     }
 }
 
-/// Full modernization request
-#[derive(Debug, Deserialize)]
-pub struct ModernizeRequest {
-    /// COBOL source code to translate
-    pub cobol_source: String,
-    /// Optional override for epsilon
-    pub epsilon: Option<f64>,
-    /// Optional override for similarity threshold
-    pub similarity_threshold: Option<f64>,
-}
+// ─── Pipeline ─────────────────────────────────────────────────────────────────
 
-/// Full modernization response — the AgentX-winning output
-#[derive(Debug, Serialize)]
-pub struct ModernizeResponse {
-    /// Unique request ID for audit trail
-    pub request_id: String,
-    /// CONSENSUS_REACHED | DISAGREEMENT | QUORUM_VIOLATION
-    pub status: String,
-    /// Translated Rust code (only present on consensus)
-    pub rust_code: Option<String>,
-    /// Combined FBA confidence
-    pub confidence: f64,
-    /// Bayesian-in-Realization or in-Expectation-Only
-    pub bayesian_guarantee: String,
-    /// k* value used
-    pub k_star: usize,
-    /// Semantic similarity between Claude and Deep Seek V3
-    pub semantic_similarity: f64,
-    /// Martingale property satisfied?
-    pub martingale_satisfied: bool,
-    /// Bayesian computation details
-    pub bayesian_details: BayesianResult,
-    /// Full FBA consensus details
-    pub fba_details: FbaConsensusResult,
-    /// Paper reference
-    pub paper_reference: String,
-    /// Action taken
-    pub action: String,
-}
-
-/// Run the complete consensus pipeline:
-/// 1. Compute k* (Bayesian optimal CoT)
-/// 2. Call Claude + Deep Seek V3 in parallel
-/// 3. Run FBA consensus
-/// 4. Return verdict + code
-pub async fn run_consensus_pipeline(
-    client: &reqwest::Client,
+/// Run full 3-node FBA consensus pipeline
+/// Returns FbaResult with consensus status and verified Rust code
+pub async fn run_consensus(
+    http_client: &reqwest::Client,
     anthropic_key: &str,
-    openai_key: &str,
-    request: ModernizeRequest,
+    nebius_key: &str,
+    cobol_source: &str,
     config: &ConsensusConfig,
-) -> Result<ModernizeResponse> {
+) -> Result<FbaResult> {
     let request_id = Uuid::new_v4().to_string();
-    info!("Starting consensus pipeline request_id={}", request_id);
+    info!("🟣 FBA Consensus v0.3.0 starting — request_id={}", request_id);
 
-    // ── Step 1: Compute k* ────────────────────────────────────────────────────
-    let cobol_lines = count_cobol_lines(&request.cobol_source);
+    // ── Step 1: Compute k* (Bayesian optimal CoT length) ─────────────────────
+    let line_count = cobol_source.lines().count();
     let params = BayesianParams {
-        cobol_line_count: cobol_lines.max(10),
-        epsilon: request.epsilon.unwrap_or(config.epsilon),
+        cobol_line_count: line_count,
+        epsilon: config.epsilon,
         theta: config.theta,
     };
     let bayesian = compute_k_star(&params);
     let k_star = bayesian.k_star;
 
     info!(
-        "k* computed: {} | formula: {} | coverage: {:.2}%",
-        k_star, bayesian.formula, bayesian.entropy_coverage
+        "Bayesian k*={} for {} COBOL lines | formula={} | entropy={:.1}%",
+        k_star, line_count, bayesian.formula, bayesian.entropy_coverage
     );
 
-    let similarity_threshold = request
-        .similarity_threshold
-        .unwrap_or(config.similarity_threshold);
+    // ── Step 2: Call all 3 nodes in parallel ─────────────────────────────────
+    info!("🚀 Calling 3 FBA nodes in parallel...");
+    info!("   Node 1: Claude Opus 4.6 (Anthropic)");
+    info!("   Node 2: DeepSeek V3.2 (Nebius)");
+    info!("   Node 3: Llama-3.3-70B (Nebius)");
 
-    // ── Step 2: Parallel LLM calls ────────────────────────────────────────────
-    info!("Firing parallel LLM calls (Claude + Deep Seek V3)...");
-
-    let (claude_result, deepseek_v3_result) = tokio::join!(
-        call_claude(client, anthropic_key, &request.cobol_source, k_star),
-        call_deepseek_v3(client, openai_key, &request.cobol_source, k_star),
+    let (claude_result, deepseek_result, llama_result) = tokio::join!(
+        call_claude(http_client, anthropic_key, cobol_source, k_star),
+        call_deepseek(http_client, nebius_key, cobol_source, k_star),
+        call_llama(http_client, nebius_key, cobol_source, k_star),
     );
 
-    let mut nodes = Vec::new();
+    // ── Step 3: Collect successful nodes ─────────────────────────────────────
+    let mut nodes: Vec<FbaNode> = Vec::new();
 
     match claude_result {
         Ok(node) => {
-            info!(
-                "Claude ✅ confidence={:.3} code_len={}",
-                node.confidence,
-                node.rust_code.len()
-            );
+            info!("✅ Node 1 (Claude): confidence={:.3}", node.confidence);
             nodes.push(node);
         }
-        Err(e) => {
-            warn!("Claude ❌ failed: {}", e);
-        }
+        Err(e) => warn!("⚠️ Node 1 (Claude) failed: {}", e),
     }
 
-    match deepseek_v3_result {
+    match deepseek_result {
         Ok(node) => {
-            info!(
-                "Deep Seek V3 ✅ confidence={:.3} code_len={}",
-                node.confidence,
-                node.rust_code.len()
-            );
+            info!("✅ Node 2 (DeepSeek): confidence={:.3}", node.confidence);
             nodes.push(node);
         }
-        Err(e) => {
-            warn!("Deep Seek V3 ❌ failed: {}", e);
-        }
+        Err(e) => warn!("⚠️ Node 2 (DeepSeek) failed: {}", e),
     }
 
-    // ── Step 3: FBA Consensus ─────────────────────────────────────────────────
-    let network = FbaNetwork::two_node_network();
-    let fba_result = run_fba_consensus(
-        nodes,
-        &network,
-        similarity_threshold,
+    match llama_result {
+        Ok(node) => {
+            info!("✅ Node 3 (Llama): confidence={:.3}", node.confidence);
+            nodes.push(node);
+        }
+        Err(e) => warn!("⚠️ Node 3 (Llama) failed: {}", e),
+    }
+
+    // Need at least 2 nodes for quorum
+    if nodes.len() < 2 {
+        return Ok(FbaResult {
+            status: "QUORUM_VIOLATION".to_string(),
+            rust_code: None,
+            confidence: 0.0,
+            semantic_similarity: 0.0,
+            bayesian_guarantee: "FAILED".to_string(),
+            martingale_satisfied: false,
+            k_star,
+            node_results: nodes,
+            paper_reference: "arxiv:2507.11768".to_string(),
+        });
+    }
+
+    // ── Step 4: FBA Quorum Intersection ──────────────────────────────────────
+    let network = FbaNetwork::new_three_node();
+    let fba_result = network.check_consensus(
+        &nodes,
+        config.similarity_threshold,
         config.confidence_threshold,
+        &bayesian,
     );
 
-    // ── Step 4: Determine action ──────────────────────────────────────────────
-    let action = match fba_result.verdict.as_str() {
-        "CONSENSUS_REACHED" => {
-            info!(
-                "✅ CONSENSUS REACHED | confidence={:.3} | similarity={:.3}",
-                fba_result.confidence, fba_result.semantic_similarity
-            );
-            "SAVE_TO_S3".to_string()
-        }
-        "DISAGREEMENT" => {
-            warn!(
-                "⚠️  DISAGREEMENT | similarity={:.3} | human review required",
-                fba_result.semantic_similarity
-            );
-            "HUMAN_REVIEW".to_string()
-        }
-        _ => {
-            warn!("🚨 QUORUM VIOLATION — system fault");
-            "SYSTEM_FAULT".to_string()
-        }
-    };
+    info!(
+        "🏁 FBA result: {} | confidence={:.3} | similarity={:.3} | k*={} | bayesian={}",
+        fba_result.status,
+        fba_result.confidence,
+        fba_result.semantic_similarity,
+        fba_result.k_star,
+        fba_result.bayesian_guarantee
+    );
 
-    Ok(ModernizeResponse {
-        request_id,
-        status: fba_result.verdict.clone(),
-        rust_code: fba_result.rust_code.clone(),
-        confidence: fba_result.confidence,
-        bayesian_guarantee: fba_result.bayesian_guarantee.clone(),
-        k_star,
-        semantic_similarity: fba_result.semantic_similarity,
-        martingale_satisfied: fba_result.martingale_satisfied,
-        bayesian_details: bayesian,
-        fba_details: fba_result,
-        paper_reference: "arxiv:2507.11768".to_string(),
-        action,
-    })
+    Ok(fba_result)
 }
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -201,9 +157,10 @@ mod tests {
 
     #[test]
     fn test_consensus_config_defaults() {
-        let cfg = ConsensusConfig::default();
-        assert_eq!(cfg.epsilon, 0.01);
-        assert_eq!(cfg.similarity_threshold, 0.75);
-        assert_eq!(cfg.confidence_threshold, 0.85);
+        let config = ConsensusConfig::default();
+        assert!(config.similarity_threshold > 0.0);
+        assert!(config.confidence_threshold > 0.0);
+        assert!(config.epsilon > 0.0);
+        assert!(config.theta > 0.0);
     }
 }

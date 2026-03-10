@@ -9,16 +9,26 @@ mod claude;
 mod consensus;
 mod deepseek_v3;
 mod fba;
+mod llama;
 
 use actix_web::{middleware, web, App, HttpResponse, HttpServer, Responder};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client as S3Client;
-use consensus::{run_consensus_pipeline, ConsensusConfig, ModernizeRequest};
+use consensus::ConsensusConfig;
 use dotenvy::dotenv;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::env;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+// ── Request/Response types ────────────────────────────────────────────────────
+
+#[derive(Deserialize, Clone)]
+pub struct ModernizeRequest {
+    pub cobol_source: String,
+    #[serde(default)]
+    pub skip_fba: bool,
+}
 
 // ── App state shared across requests ─────────────────────────────────────────
 
@@ -27,7 +37,7 @@ struct AppState {
     s3_client: S3Client,
     s3_bucket: String,
     anthropic_key: String,
-    openai_key: String,
+    nebius_key: String,
     consensus_config: ConsensusConfig,
 }
 
@@ -46,7 +56,7 @@ async fn health() -> impl Responder {
     HttpResponse::Ok().json(HealthResponse {
         status: "healthy".to_string(),
         agent: "purple_agent".to_string(),
-        version: "0.2.0".to_string(),
+        version: "0.3.0".to_string(),
         paper_reference: "arxiv:2507.11768".to_string(),
         endpoints: vec![
             "GET  /health".to_string(),
@@ -60,8 +70,9 @@ async fn health() -> impl Responder {
 
 #[derive(Serialize)]
 struct ConfigResponse {
-    model_primary: String,
-    model_secondary: String,
+    model_node1: String,
+    model_node2: String,
+    model_node3: String,
     similarity_threshold: f64,
     confidence_threshold: f64,
     epsilon: f64,
@@ -72,13 +83,14 @@ struct ConfigResponse {
 
 async fn get_config(state: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().json(ConfigResponse {
-        model_primary: "claude-opus-4-6".to_string(),
-        model_secondary: "deepseek_v3".to_string(),
+        model_node1: "claude-opus-4-6 (Anthropic)".to_string(),
+        model_node2: "deepseek-ai/DeepSeek-V3-0324 (Nebius)".to_string(),
+        model_node3: "meta-llama/Llama-3.3-70B-Instruct-fast (Nebius)".to_string(),
         similarity_threshold: state.consensus_config.similarity_threshold,
         confidence_threshold: state.consensus_config.confidence_threshold,
         epsilon: state.consensus_config.epsilon,
         theta: state.consensus_config.theta,
-        fba_network: "2-node (Claude + DeepSeek V3)".to_string(),
+        fba_network: "3-node (Claude + DeepSeek V3.2 + Llama-3.3-70B) via Nebius".to_string(),
         s3_bucket: state.s3_bucket.clone(),
     })
 }
@@ -94,12 +106,14 @@ async fn modernize(
         body.cobol_source.lines().count()
     );
 
-    // Run the full FBA consensus pipeline
-    let result = run_consensus_pipeline(
+    let cobol_source = body.into_inner().cobol_source;
+
+    // Run the full 3-node FBA consensus pipeline
+    let result = consensus::run_consensus(
         &state.http_client,
         &state.anthropic_key,
-        &state.openai_key,
-        body.into_inner(),
+        &state.nebius_key,
+        &cobol_source,
         &state.consensus_config,
     )
     .await;
@@ -107,25 +121,27 @@ async fn modernize(
     match result {
         Ok(response) => {
             let status = response.status.clone();
-            let action = response.action.clone();
-            let request_id = response.request_id.clone();
+            let request_id = uuid::Uuid::new_v4().to_string();
 
             // If consensus reached, save to S3
             if status == "CONSENSUS_REACHED" {
                 if let Some(ref rust_code) = response.rust_code {
                     let s3_key = format!("purple_agent/{}/output.rs", request_id);
-                    match save_to_s3(&state.s3_client, &state.s3_bucket, &s3_key, rust_code).await {
+                    match save_to_s3(
+                        &state.s3_client,
+                        &state.s3_bucket,
+                        &s3_key,
+                        rust_code.as_str(),
+                    )
+                    .await
+                    {
                         Ok(_) => info!("✅ Saved to S3: s3://{}/{}", state.s3_bucket, s3_key),
                         Err(e) => warn!("S3 save failed (non-fatal): {}", e),
                     }
                 }
             }
 
-            info!(
-                "Request {} complete: {} | action={}",
-                request_id, status, action
-            );
-
+            info!("Request {} complete: {}", request_id, status);
             HttpResponse::Ok().json(response)
         }
         Err(e) => {
@@ -163,33 +179,28 @@ async fn save_to_s3(
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // Load .env file (optional — won't fail if missing)
     dotenv().ok();
 
-    // Initialize structured logging
     tracing_subscriber::registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env().add_directive("purple_agent=info".parse().unwrap()))
         .init();
 
-    info!("🟣 Purple Agent starting — FBA Consensus Engine");
+    info!("🟣 Purple Agent v0.3.0 starting — 3-Node FBA Consensus Engine");
     info!("   Paper: arxiv:2507.11768");
-    info!("   Models: Claude Opus 4.6 (primary) + DeepSeek V3 (secondary)");
+    info!("   Node 1: Claude Opus 4.6 (Anthropic)");
+    info!("   Node 2: DeepSeek-V3-0324 (Nebius)");
+    info!("   Node 3: Llama-3.3-70B-Instruct-fast (Nebius)");
 
-    // ── Load required environment variables ───────────────────────────────────
     let anthropic_key = env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set");
-
-    let openai_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
-
+    let nebius_key = env::var("NEBIUS_API_KEY").expect("NEBIUS_API_KEY must be set");
     let s3_bucket =
         env::var("S3_BUCKET").unwrap_or_else(|_| "mainframe-refactor-lab-venkatnagala".to_string());
-
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| "8081".to_string())
         .parse()
         .expect("PORT must be a number");
 
-    // ── Optional consensus tuning via env vars ────────────────────────────────
     let consensus_config = ConsensusConfig {
         similarity_threshold: env::var("SIMILARITY_THRESHOLD")
             .unwrap_or_else(|_| "0.75".to_string())
@@ -217,11 +228,9 @@ async fn main() -> std::io::Result<()> {
         consensus_config.theta
     );
 
-    // ── Build AWS S3 client ───────────────────────────────────────────────────
     let aws_config = aws_config::load_defaults(BehaviorVersion::latest()).await;
     let s3_client = S3Client::new(&aws_config);
 
-    // ── Build shared HTTP client ──────────────────────────────────────────────
     let http_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .build()
@@ -232,7 +241,7 @@ async fn main() -> std::io::Result<()> {
         s3_client,
         s3_bucket,
         anthropic_key,
-        openai_key,
+        nebius_key,
         consensus_config,
     });
 

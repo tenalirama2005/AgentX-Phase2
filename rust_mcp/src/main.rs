@@ -134,7 +134,7 @@ edition = "2021"
                 use std::process::Stdio;
                 use std::io::Write;
 
-                let mut child = Command::new(&binary_path)
+                let child = Command::new(&binary_path)
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())

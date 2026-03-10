@@ -105,7 +105,7 @@ async fn compile(
                 use std::process::Stdio;
                 use std::io::Write;
 
-                let mut child = exec_cmd
+                let child = exec_cmd
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())

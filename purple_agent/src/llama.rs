@@ -1,5 +1,5 @@
-// DeepSeek V3.2 via Nebius API — FBA Node 2
-// Model: deepseek-ai/DeepSeek-V3-0324
+// Llama 3.3 70B via Nebius API — FBA Node 3
+// Model: meta-llama/Llama-3.3-70B-Instruct-fast
 // Endpoint: https://api.tokenfactory.nebius.com/v1/
 
 use anyhow::{anyhow, Result};
@@ -9,7 +9,7 @@ use tracing::{error, info};
 use crate::fba::FbaNode;
 
 const NEBIUS_API_URL: &str = "https://api.tokenfactory.nebius.com/v1/chat/completions";
-const MODEL: &str = "deepseek-ai/DeepSeek-V3-0324";
+const MODEL: &str = "meta-llama/Llama-3.3-70B-Instruct-fast";
 
 // ─── OpenAI-Compatible Request/Response ───────────────────────────────────────
 
@@ -39,13 +39,13 @@ struct Choice {
 
 // ─── Main Function ────────────────────────────────────────────────────────────
 
-pub async fn call_deepseek(
+pub async fn call_llama(
     client: &reqwest::Client,
     api_key: &str,
     cobol_source: &str,
     k_star: usize,
 ) -> Result<FbaNode> {
-    info!("Calling DeepSeek V3.2 (Nebius) with k*={} CoT steps", k_star);
+    info!("Calling Llama-3.3-70B (Nebius) with k*={} CoT steps", k_star);
 
     let system_prompt = format!(
         "You are an expert COBOL-to-Rust modernization engineer. \
@@ -86,19 +86,19 @@ pub async fn call_deepseek(
         .timeout(std::time::Duration::from_secs(120))
         .send()
         .await
-        .map_err(|e| anyhow!("DeepSeek Nebius request failed: {}", e))?;
+        .map_err(|e| anyhow!("Llama Nebius request failed: {}", e))?;
 
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
-        error!("DeepSeek Nebius HTTP {}: {}", status, body);
-        return Err(anyhow!("DeepSeek Nebius HTTP {}: {}", status, body));
+        error!("Llama Nebius HTTP {}: {}", status, body);
+        return Err(anyhow!("Llama Nebius HTTP {}: {}", status, body));
     }
 
     let parsed: OpenAiResponse = response
         .json()
         .await
-        .map_err(|e| anyhow!("Failed to parse DeepSeek response: {}", e))?;
+        .map_err(|e| anyhow!("Failed to parse Llama response: {}", e))?;
 
     let raw_text = parsed
         .choices
@@ -107,17 +107,17 @@ pub async fn call_deepseek(
         .map(|c| c.message.content)
         .unwrap_or_default();
 
-    let (rust_code, confidence) = parse_deepseek_response(&raw_text);
+    let (rust_code, confidence) = parse_llama_response(&raw_text);
 
     info!(
-        "DeepSeek V3.2 (Nebius): code_len={} confidence={:.2}",
+        "Llama-3.3-70B (Nebius): code_len={} confidence={:.2}",
         rust_code.len(),
         confidence
     );
 
     Ok(FbaNode {
-        node_id: "deepseek_v3_nebius".to_string(),
-        model_name: "DeepSeek-V3.2 (Nebius)".to_string(),
+        node_id: "llama_3_3_70b".to_string(),
+        model_name: "Llama-3.3-70B-Instruct-fast (Nebius)".to_string(),
         rust_code,
         confidence,
         cot_steps_used: k_star,
@@ -127,28 +127,25 @@ pub async fn call_deepseek(
 
 // ─── Response Parser ──────────────────────────────────────────────────────────
 
-fn parse_deepseek_response(raw: &str) -> (String, f64) {
+fn parse_llama_response(raw: &str) -> (String, f64) {
     let rust_code = extract_rust_code(raw);
     let confidence = extract_confidence(raw);
     (rust_code, confidence)
 }
 
 fn extract_rust_code(raw: &str) -> String {
-    // Try ```rust ... ``` block first
     if let Some(start) = raw.find("```rust") {
         let after = &raw[start + 7..];
         if let Some(end) = after.find("```") {
             return after[..end].trim().to_string();
         }
     }
-    // Fallback: ``` ... ```
     if let Some(start) = raw.find("```") {
         let after = &raw[start + 3..];
         if let Some(end) = after.find("```") {
             return after[..end].trim().to_string();
         }
     }
-    // Last resort: return everything after "fn main"
     if let Some(pos) = raw.find("fn main") {
         return raw[pos..].trim().to_string();
     }
@@ -174,15 +171,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_rust_code_deepseek_v3_format() {
+    fn test_extract_rust_code_llama_format() {
         let response = r#"
-After 5 reasoning steps:
+Let me translate this step by step:
 
-Step 1: Analyze COBOL structure
-Step 2: Map PIC clauses to Rust types
-Step 3: Convert COMPUTE to Rust arithmetic
-Step 4: Handle DISPLAY with println!
-Step 5: Verify business logic
+Step 1: Identify variables — WS-PRINCIPAL, WS-RATE, WS-INTEREST
+Step 2: Map PIC 9(7)V99 → f64
+Step 3: COMPUTE → Rust arithmetic
+Step 4: DISPLAY → println!
+Step 5: Verify output format
 
 ```rust
 fn main() {
@@ -193,12 +190,12 @@ fn main() {
 }
 ```
 
-CONFIDENCE: 0.94
+CONFIDENCE: 0.92
         "#;
 
-        let (code, confidence) = parse_deepseek_response(response);
+        let (code, confidence) = parse_llama_response(response);
         assert!(code.contains("fn main"));
         assert!(code.contains("ws_interest"));
-        assert!((confidence - 0.94).abs() < 0.01);
+        assert!((confidence - 0.92).abs() < 0.01);
     }
 }

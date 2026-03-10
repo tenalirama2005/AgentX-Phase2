@@ -101,6 +101,7 @@ pub fn compute_k_star(params: &BayesianParams) -> BayesianResult {
 }
 
 /// Count meaningful lines in COBOL source (excluding blanks/comments)
+#[allow(dead_code)]
 pub fn count_cobol_lines(cobol_source: &str) -> usize {
     cobol_source
         .lines()
