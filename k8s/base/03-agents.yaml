@@ -32,7 +32,7 @@ spec:
           command: ['sh', '-c', 'until wget -qO- http://agent-gateway:8090/health; do echo "Waiting for agent-gateway..."; sleep 3; done']
       containers:
         - name: green-agent
-          image: venkatnagala/green-agent:1.0.0
+          image: tenalirama2026/green-agent:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -57,17 +57,22 @@ spec:
                 secretKeyRef:
                   name: green-agent-credentials
                   key: api-key
-            # AWS config (IRSA preferred, fallback to secret)
-            - name: AWS_REGION
-              valueFrom:
-                configMapKeyRef:
-                  name: pipeline-config
-                  key: aws-region
+            - name: S3_MCP_URL
+              value: "http://s3-mcp:8081"
+            - name: COBOL_MCP_URL
+              value: "http://cobol-mcp:8083"
+            - name: PURPLE_AGENT_URL
+              value: "http://purple-agent:8081"
             - name: S3_BUCKET
               valueFrom:
                 configMapKeyRef:
                   name: pipeline-config
                   key: s3-bucket
+            - name: AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: pipeline-config
+                  key: aws-region
           resources:
             requests:
               cpu: "250m"
@@ -146,10 +151,10 @@ spec:
           command: ['sh', '-c', 'until wget -qO- http://agent-gateway:8090/health; do echo "Waiting for agent-gateway..."; sleep 3; done']
       containers:
         - name: purple-agent
-          image: venkatnagala/purple-agent:1.0.0
+          image: tenalirama2026/purple-agent:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 8085
+            - containerPort: 8081
               name: http
           env:
             - name: RUST_LOG
@@ -169,16 +174,21 @@ spec:
                 secretKeyRef:
                   name: purple-agent-credentials
                   key: api-key
-            - name: GEMINI_API_KEY
+            - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: purple-agent-credentials
-                  key: gemini-api-key
-            - name: GEMINI_MODEL
+                  key: anthropic-api-key
+            - name: NEBIUS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: purple-agent-credentials
+                  key: nebius-api-key
+            - name: CLAUDE_MODEL
               valueFrom:
                 configMapKeyRef:
                   name: pipeline-config
-                  key: gemini-model
+                  key: claude-model
           resources:
             requests:
               cpu: "500m"
@@ -189,7 +199,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: 8085
+              port: 8081
             initialDelaySeconds: 30
             periodSeconds: 30
           securityContext:
@@ -216,8 +226,8 @@ spec:
     app: purple-agent
   ports:
     - name: http
-      port: 8085
-      targetPort: 8085
+      port: 8081
+      targetPort: 8081
   type: ClusterIP
 ---
 # Horizontal Pod Autoscaler for Purple Agent

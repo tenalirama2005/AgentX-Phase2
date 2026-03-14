@@ -276,7 +276,7 @@ async fn health() -> HttpResponse {
 
     HttpResponse::Ok().json(serde_json::json!({
         "status": "healthy",
-        "service": "rust-mcp",
+        "service": "rust_mcp",
         "version": "1.0.0",
         "cargo_available": cargo_available,
         "rustc_version": rustc_version

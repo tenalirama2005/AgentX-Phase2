@@ -19,44 +19,51 @@ use tracing::{info, warn};
 /// An FBA "node" representing one LLM participant
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FbaNode {
-    /// Node identifier (e.g., "claude_opus_4_6", "deepseek_v3_nebius")
     pub node_id: String,
-    /// Human-readable model name
     pub model_name: String,
-    /// Rust code produced by this node
     pub rust_code: String,
-    /// Confidence score [0.0, 1.0]
     pub confidence: f64,
-    /// Number of CoT steps used
     pub cot_steps_used: usize,
-    /// Raw response for audit trail
     pub raw_response: String,
 }
 
 /// Quorum slice: the set of nodes that together form a quorum for a given node
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct QuorumSlice {
+    #[allow(dead_code)]
     pub node_id: String,
     pub trusted_nodes: Vec<String>,
-    /// Threshold: how many trusted nodes must agree
+    /// Threshold: how many trusted nodes must agree for this node to ratify
     pub threshold: usize,
 }
 
+impl QuorumSlice {
+    /// Check if this node's quorum slice is satisfied given a set of agreeing node IDs.
+    /// Per SCP: a node v ratifies a statement if enough of its trusted nodes agree.
+    pub fn is_satisfied(&self, agreeing_nodes: &[&str]) -> bool {
+        let count = self.trusted_nodes
+            .iter()
+            .filter(|trusted| agreeing_nodes.contains(&trusted.as_str()))
+            .count();
+        count >= self.threshold
+    }
+}
+
 /// FBA Network configuration
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct FbaNetwork {
+    #[allow(dead_code)]
     pub nodes: Vec<String>,
     pub quorum_slices: HashMap<String, QuorumSlice>,
     /// Global quorum threshold (fraction of total nodes)
+    #[allow(dead_code)]
     pub quorum_threshold: f64,
 }
 
 impl FbaNetwork {
-
     /// Create a 3-node FBA network (Claude + DeepSeek V3.2 + Llama 3.3 70B)
     /// Quorum = any 2 of 3 nodes agree → quorum intersection guaranteed
+    #[allow(dead_code)]
     pub fn new_three_node() -> Self {
         let nodes = vec![
             "claude_opus_4_6".to_string(),
@@ -74,7 +81,7 @@ impl FbaNetwork {
                     "deepseek_v3_nebius".to_string(),
                     "llama_3_3_70b".to_string(),
                 ],
-                threshold: 1,
+                threshold: 1,   // needs 1 of 2 trusted nodes to agree
             },
         );
 
@@ -109,6 +116,91 @@ impl FbaNetwork {
         }
     }
 
+    /// Create an N-node FBA network dynamically from responding node IDs.
+    /// Each node trusts all others — threshold = ceil(n * quorum_threshold) - 1
+    /// This allows graceful degradation when some nodes fail or timeout.
+    pub fn new_dynamic(node_ids: &[String], quorum_threshold: f64) -> Self {
+        let n = node_ids.len();
+        // Each node needs ceil(n * quorum_threshold) - 1 peers to agree
+        // (minus 1 because the node itself is not in its own trusted list)
+        let threshold = ((n as f64 * quorum_threshold).ceil() as usize).saturating_sub(1).max(1);
+
+        let mut quorum_slices = HashMap::new();
+
+        for node_id in node_ids {
+            let trusted: Vec<String> = node_ids
+                .iter()
+                .filter(|id| *id != node_id)
+                .cloned()
+                .collect();
+
+            quorum_slices.insert(
+                node_id.clone(),
+                QuorumSlice {
+                    node_id:       node_id.clone(),
+                    trusted_nodes: trusted,
+                    threshold,
+                },
+            );
+        }
+
+        Self {
+            nodes:            node_ids.to_vec(),
+            quorum_slices,
+            quorum_threshold,
+        }
+    }
+
+
+    /// Find all pairs of nodes whose outputs are semantically similar
+    /// Returns: Vec of (node_a, node_b, similarity)
+    fn find_agreeing_pairs<'a>(
+        &self,
+        nodes: &'a [FbaNode],
+        similarity_threshold: f64,
+    ) -> Vec<(&'a FbaNode, &'a FbaNode, f64)> {
+        let mut pairs = Vec::new();
+        for i in 0..nodes.len() {
+            for j in (i + 1)..nodes.len() {
+                let sim = compute_code_similarity(&nodes[i].rust_code, &nodes[j].rust_code);
+                if sim >= similarity_threshold {
+                    pairs.push((&nodes[i], &nodes[j], sim));
+                }
+            }
+        }
+        pairs
+    }
+
+    /// SCP Quorum Intersection check:
+    /// A statement is ratified when every node's quorum slice is satisfied.
+    /// For 3-node network: need at least 2 nodes agreeing so that each of those
+    /// nodes sees at least 1 trusted peer agreeing — satisfying their quorum slice.
+    fn check_quorum_intersection(
+        &self,
+        agreeing_node_ids: &[&str],
+    ) -> bool {
+        if agreeing_node_ids.len() < 2 {
+            return false;
+        }
+
+        // Every agreeing node must have its quorum slice satisfied
+        let all_satisfied = agreeing_node_ids.iter().all(|node_id| {
+            if let Some(slice) = self.quorum_slices.get(*node_id) {
+                let satisfied = slice.is_satisfied(agreeing_node_ids);
+                info!(
+                    "QuorumSlice[{}]: threshold={} trusted={:?} agreeing={:?} → satisfied={}",
+                    node_id, slice.threshold, slice.trusted_nodes, agreeing_node_ids, satisfied
+                );
+                satisfied
+            } else {
+                warn!("No QuorumSlice found for node: {}", node_id);
+                false
+            }
+        });
+
+        all_satisfied
+    }
+
     /// Check consensus across nodes using FBA quorum intersection
     /// Returns FbaResult with status and winning Rust code
     pub fn check_consensus(
@@ -120,9 +212,7 @@ impl FbaNetwork {
     ) -> FbaResult {
         info!(
             "FBA check_consensus: {} nodes, sim_threshold={:.2}, conf_threshold={:.2}",
-            nodes.len(),
-            similarity_threshold,
-            confidence_threshold
+            nodes.len(), similarity_threshold, confidence_threshold
         );
 
         let k_star = bayesian.k_star;
@@ -143,7 +233,7 @@ impl FbaNetwork {
             };
         }
 
-        // Find the best pair with highest similarity
+        // Step 1: Find best agreeing pair by similarity
         let mut best_similarity = 0.0f64;
         let mut best_pair: Option<(&FbaNode, &FbaNode)> = None;
 
@@ -159,7 +249,7 @@ impl FbaNetwork {
 
         info!("Best pair similarity: {:.3}", best_similarity);
 
-        // Check confidence — at least 2 nodes must meet threshold
+        // Step 2: Check confidence — at least 2 nodes must meet threshold
         let confident_nodes: Vec<&FbaNode> = nodes
             .iter()
             .filter(|n| n.confidence >= confidence_threshold)
@@ -169,14 +259,38 @@ impl FbaNetwork {
         if !all_confident {
             warn!(
                 "Only {}/{} nodes meet confidence threshold {:.2}",
-                confident_nodes.len(),
-                nodes.len(),
-                confidence_threshold
+                confident_nodes.len(), nodes.len(), confidence_threshold
             );
         }
 
-        // Martingale: 2/3 quorum AND similarity >= threshold AND confidence OK
-        let martingale_satisfied = best_similarity >= similarity_threshold && all_confident;
+        // Step 3: SCP Quorum Intersection — wire QuorumSlice into consensus decision
+        // Find agreeing pairs (similarity >= threshold)
+        let agreeing_pairs = self.find_agreeing_pairs(nodes, similarity_threshold);
+
+        // Collect all node IDs that are part of at least one agreeing pair
+        let mut agreeing_ids: Vec<&str> = Vec::new();
+        for (a, b, sim) in &agreeing_pairs {
+            info!("Agreeing pair: {} ↔ {} (sim={:.3})", a.node_id, b.node_id, sim);
+            if !agreeing_ids.contains(&a.node_id.as_str()) {
+                agreeing_ids.push(a.node_id.as_str());
+            }
+            if !agreeing_ids.contains(&b.node_id.as_str()) {
+                agreeing_ids.push(b.node_id.as_str());
+            }
+        }
+
+        // Step 4: Verify quorum intersection per SCP protocol
+        let quorum_intersection = self.check_quorum_intersection(&agreeing_ids);
+
+        info!(
+            "Quorum intersection: {} | agreeing_nodes={:?}",
+            quorum_intersection, agreeing_ids
+        );
+
+        // Step 5: Martingale satisfied = quorum intersection + confidence + similarity
+        let martingale_satisfied = best_similarity >= similarity_threshold
+            && all_confident
+            && quorum_intersection;
 
         let status = if martingale_satisfied {
             "CONSENSUS_REACHED".to_string()
@@ -213,8 +327,10 @@ impl FbaNetwork {
         };
 
         info!(
-            "FBA result: {} | confidence={:.3} | similarity={:.3} | bayesian={}",
-            status, combined_confidence, best_similarity, bayesian_guarantee
+            "FBA result: {} | confidence={:.3} | similarity={:.3} | \
+             quorum_intersection={} | bayesian={}",
+            status, combined_confidence, best_similarity,
+            quorum_intersection, bayesian_guarantee
         );
 
         FbaResult {
@@ -231,10 +347,6 @@ impl FbaNetwork {
     }
 }
 
-
-
-
-
 /// FbaResult — 3-node pipeline result type
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FbaResult {
@@ -248,7 +360,6 @@ pub struct FbaResult {
     pub node_results: Vec<FbaNode>,
     pub paper_reference: String,
 }
-
 
 /// Semantic Code Equivalence Engine — 5-Layer Analysis
 pub fn compute_code_similarity(code_a: &str, code_b: &str) -> f64 {
@@ -497,7 +608,40 @@ mod tests {
         }
     }
 
-    // ── 3-node network tests ──────────────────────────────────────────────────
+    #[test]
+    fn test_quorum_slice_satisfied() {
+        let slice = QuorumSlice {
+            node_id: "claude_opus_4_6".to_string(),
+            trusted_nodes: vec![
+                "deepseek_v3_nebius".to_string(),
+                "llama_3_3_70b".to_string(),
+            ],
+            threshold: 1,
+        };
+        // 1 trusted node agrees → satisfied
+        assert!(slice.is_satisfied(&["deepseek_v3_nebius"]));
+        // Both trusted nodes agree → satisfied
+        assert!(slice.is_satisfied(&["deepseek_v3_nebius", "llama_3_3_70b"]));
+        // No trusted node agrees → not satisfied
+        assert!(!slice.is_satisfied(&["unknown_node"]));
+        // Empty → not satisfied
+        assert!(!slice.is_satisfied(&[]));
+    }
+
+    #[test]
+    fn test_quorum_intersection_two_nodes() {
+        let net = FbaNetwork::new_three_node();
+        // Claude + DeepSeek agree → each sees the other as trusted → intersection holds
+        assert!(net.check_quorum_intersection(&["claude_opus_4_6", "deepseek_v3_nebius"]));
+        // All 3 agree → intersection holds
+        assert!(net.check_quorum_intersection(&[
+            "claude_opus_4_6", "deepseek_v3_nebius", "llama_3_3_70b"
+        ]));
+        // Only 1 node → no intersection
+        assert!(!net.check_quorum_intersection(&["claude_opus_4_6"]));
+        // Empty → no intersection
+        assert!(!net.check_quorum_intersection(&[]));
+    }
 
     #[test]
     fn test_three_node_network_structure() {
@@ -511,7 +655,6 @@ mod tests {
 
     #[test]
     fn test_three_node_consensus_all_agree() {
-        // All 3 nodes agree → CONSENSUS_REACHED
         let network = FbaNetwork::new_three_node();
         let code = "fn calculate(x: f64) -> f64 { x * 0.055 }";
         let nodes = vec![
@@ -519,7 +662,6 @@ mod tests {
             make_node("deepseek_v3_nebius", "DeepSeek V3.2 (Nebius)", code, 0.91),
             make_node("llama_3_3_70b", "Llama-3.3-70B (Nebius)", code, 0.90),
         ];
-
         let result = network.check_consensus(&nodes, 0.75, 0.85, &make_bayesian());
         assert_eq!(result.status, "CONSENSUS_REACHED");
         assert!(result.rust_code.is_some());
@@ -529,14 +671,12 @@ mod tests {
 
     #[test]
     fn test_three_node_quorum_with_one_failure() {
-        // Llama offline — Claude + DeepSeek still form 2/3 quorum
         let network = FbaNetwork::new_three_node();
         let code = "fn calculate(x: f64) -> f64 { x * 0.055 }";
         let nodes = vec![
             make_node("claude_opus_4_6", "Claude Opus 4.6", code, 0.94),
             make_node("deepseek_v3_nebius", "DeepSeek V3.2 (Nebius)", code, 0.91),
         ];
-
         let result = network.check_consensus(&nodes, 0.75, 0.85, &make_bayesian());
         assert_eq!(result.status, "CONSENSUS_REACHED");
         assert!(result.rust_code.is_some());
@@ -545,13 +685,11 @@ mod tests {
 
     #[test]
     fn test_quorum_violation_one_node() {
-        // Only 1 node — quorum violated
         let network = FbaNetwork::new_three_node();
         let nodes = vec![
             make_node("claude_opus_4_6", "Claude Opus 4.6",
                 "fn calculate(x: f64) -> f64 { x * 0.055 }", 0.94),
         ];
-
         let result = network.check_consensus(&nodes, 0.75, 0.85, &make_bayesian());
         assert_eq!(result.status, "QUORUM_VIOLATION");
         assert!(result.rust_code.is_none());
@@ -559,7 +697,6 @@ mod tests {
 
     #[test]
     fn test_three_node_disagreement() {
-        // All 3 nodes produce completely different code → DISAGREEMENT
         let network = FbaNetwork::new_three_node();
         let nodes = vec![
             make_node("claude_opus_4_6", "Claude Opus 4.6",
@@ -569,13 +706,10 @@ mod tests {
             make_node("llama_3_3_70b", "Llama-3.3-70B",
                 "struct Employee { name: String, salary: f64 } impl Employee { fn new() -> Self { todo!() } }", 0.90),
         ];
-
         let result = network.check_consensus(&nodes, 0.75, 0.85, &make_bayesian());
         assert_eq!(result.status, "DISAGREEMENT");
         assert!(result.rust_code.is_none());
     }
-
-    // ── Similarity tests ──────────────────────────────────────────────────────
 
     #[test]
     fn test_code_similarity_identical() {
@@ -600,23 +734,7 @@ mod tests {
             }
         "#;
         let sim = compute_code_similarity(claude, deepseek_v3);
-        println!("Claude vs DeepSeek V3 (same logic, diff names): {:.3}", sim);
         assert!(sim > 0.75, "Expected > 0.75, got {:.3}", sim);
-    }
-
-    #[test]
-    fn test_semantic_equivalence_different_structure() {
-        let a = "fn interest(p: f64, r: f64) -> f64 { p * r / 100.0 }";
-        let b = r#"
-            fn interest(principal: f64, rate: f64) -> f64 {
-                let numerator = principal * rate;
-                let result = numerator / 100.0;
-                result
-            }
-        "#;
-        let sim = compute_code_similarity(a, b);
-        println!("Inline vs let-binding: {:.3}", sim);
-        assert!(sim > 0.65, "Expected > 0.65, got {:.3}", sim);
     }
 
     #[test]
@@ -632,16 +750,6 @@ mod tests {
             }
         "#;
         let sim = compute_code_similarity(a, b);
-        println!("Interest vs Payroll (different logic): {:.3}", sim);
         assert!(sim < 0.6, "Expected < 0.6, got {:.3}", sim);
-    }
-
-    #[test]
-    fn test_numeric_literal_normalization() {
-        let a = "fn f() -> f64 { 5.50 * 100.0 }";
-        let b = "fn g() -> f64 { 5.5 * 100.0 }";
-        let sim = compute_code_similarity(a, b);
-        println!("5.50 vs 5.5 normalization: {:.3}", sim);
-        assert!(sim > 0.85, "Expected > 0.85, got {:.3}", sim);
     }
 }

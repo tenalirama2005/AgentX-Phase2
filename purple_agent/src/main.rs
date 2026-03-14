@@ -1,267 +1,177 @@
-/// Purple Agent — FBA Consensus Engine for COBOL→Rust Modernization
-/// AgentX Phase 2 | Sprint 1 | Mainframe-Modernization team
-///
-/// API:  POST http://localhost:8081/modernize
-/// Team: Venkateshwar Rao Nagala (@venkatnagala)
-/// Ref:  arxiv:2507.11768 — "LLMs are Bayesian, in Expectation, not in Realization"
-mod bayesian;
-mod claude;
-mod consensus;
-mod deepseek_v3;
-mod fba;
-mod llama;
+// purple_agent/src/main.rs — v0.4.0
+// Wires run_consensus() into the /review handler (31-node FBA)
+// Web framework: actix-web 4
 
-use actix_web::{middleware, web, App, HttpResponse, HttpServer, Responder};
-use aws_config::BehaviorVersion;
-use aws_sdk_s3::Client as S3Client;
-use consensus::ConsensusConfig;
-use dotenvy::dotenv;
+use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use serde::{Deserialize, Serialize};
-use std::env;
-use tracing::{error, info, warn};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing::{error, info};
 
-// ── Request/Response types ────────────────────────────────────────────────────
+mod bayesian;
+mod consensus;
+mod fba;
+mod nebius_client;
 
-#[derive(Deserialize, Clone)]
-pub struct ModernizeRequest {
+use consensus::{run_consensus, AppState, ConsensusConfig};
+
+// ---------------------------------------------------------------------------
+// Actix web-layer state wrapper
+// ---------------------------------------------------------------------------
+
+pub struct WebState {
+    pub inner: AppState,
+}
+
+// ---------------------------------------------------------------------------
+// Request / Response types — field names MUST match green_agent's
+// PurpleAgentResponse and FbaNodeResult structs exactly
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct ReviewRequest {
     pub cobol_source: String,
-    #[serde(default)]
-    pub skip_fba: bool,
+    pub review_id: Option<String>,
 }
 
-// ── App state shared across requests ─────────────────────────────────────────
-
-struct AppState {
-    http_client: reqwest::Client,
-    s3_client: S3Client,
-    s3_bucket: String,
-    anthropic_key: String,
-    nebius_key: String,
-    consensus_config: ConsensusConfig,
+/// Matches green_agent's FbaNodeResult exactly
+#[derive(Debug, Serialize)]
+pub struct NodeSummary {
+    pub node_id:        String,
+    pub model_name:     String,
+    pub rust_code:      String,
+    pub confidence:     f64,
+    pub cot_steps_used: usize,
 }
 
-// ── Health check ──────────────────────────────────────────────────────────────
-
-#[derive(Serialize)]
-struct HealthResponse {
-    status: String,
-    agent: String,
-    version: String,
-    paper_reference: String,
-    endpoints: Vec<String>,
+/// Matches green_agent's PurpleAgentResponse
+#[derive(Debug, Serialize)]
+pub struct ReviewResponse {
+    pub status: String,                  // fba.status
+    pub rust_code: Option<String>,       // fba.rust_code
+    pub confidence: f64,                 // fba.fba_confidence / fba.confidence
+    pub bayesian_guarantee: String,      // fba.bayesian_guarantee
+    pub k_star: usize,                   // fba.k_star
+    pub semantic_similarity: f64,
+    pub node_results: Vec<NodeSummary>,  // fba.node_results
+    pub paper_reference: String,
 }
 
-async fn health() -> impl Responder {
-    HttpResponse::Ok().json(HealthResponse {
-        status: "healthy".to_string(),
-        agent: "purple_agent".to_string(),
-        version: "0.3.0".to_string(),
-        paper_reference: "arxiv:2507.11768".to_string(),
-        endpoints: vec![
-            "GET  /health".to_string(),
-            "POST /modernize".to_string(),
-            "GET  /config".to_string(),
-        ],
-    })
-}
+// ---------------------------------------------------------------------------
+// /modernize + /review handler (green_agent calls /modernize)
+// ---------------------------------------------------------------------------
 
-// ── Config endpoint ───────────────────────────────────────────────────────────
-
-#[derive(Serialize)]
-struct ConfigResponse {
-    model_node1: String,
-    model_node2: String,
-    model_node3: String,
-    similarity_threshold: f64,
-    confidence_threshold: f64,
-    epsilon: f64,
-    theta: f64,
-    fba_network: String,
-    s3_bucket: String,
-}
-
-async fn get_config(state: web::Data<AppState>) -> impl Responder {
-    HttpResponse::Ok().json(ConfigResponse {
-        model_node1: "claude-opus-4-6 (Anthropic)".to_string(),
-        model_node2: "deepseek-ai/DeepSeek-V3-0324 (Nebius)".to_string(),
-        model_node3: "meta-llama/Llama-3.3-70B-Instruct-fast (Nebius)".to_string(),
-        similarity_threshold: state.consensus_config.similarity_threshold,
-        confidence_threshold: state.consensus_config.confidence_threshold,
-        epsilon: state.consensus_config.epsilon,
-        theta: state.consensus_config.theta,
-        fba_network: "3-node (Claude + DeepSeek V3.2 + Llama-3.3-70B) via Nebius".to_string(),
-        s3_bucket: state.s3_bucket.clone(),
-    })
-}
-
-// ── /modernize endpoint ───────────────────────────────────────────────────────
-
-async fn modernize(
-    state: web::Data<AppState>,
-    body: web::Json<ModernizeRequest>,
+async fn review_handler(
+    state: web::Data<WebState>,
+    req: web::Json<ReviewRequest>,
 ) -> impl Responder {
+    let review_id = req
+        .review_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    info!(review_id = %review_id, "Received request — starting 31-node consensus");
+
+    let fba_result = run_consensus(&state.inner, &req.cobol_source).await;
+
+    let node_results: Vec<NodeSummary> = fba_result
+        .node_results
+        .iter()
+        .map(|n| NodeSummary {
+            node_id:        n.node_id.clone(),
+            model_name:     n.model_name.clone(),
+            rust_code:      n.rust_code.clone(),
+            confidence:     n.confidence,
+            cot_steps_used: n.cot_steps_used,
+        })
+        .collect();
+
     info!(
-        "POST /modernize | cobol_lines={}",
-        body.cobol_source.lines().count()
+        review_id = %review_id,
+        status = %fba_result.status,
+        bayesian_guarantee = %fba_result.bayesian_guarantee,
+        confidence = fba_result.confidence,
+        semantic_similarity = fba_result.semantic_similarity,
+        nodes_responded = node_results.len(),
+        "Consensus complete"
     );
 
-    let cobol_source = body.into_inner().cobol_source;
-
-    // Run the full 3-node FBA consensus pipeline
-    let result = consensus::run_consensus(
-        &state.http_client,
-        &state.anthropic_key,
-        &state.nebius_key,
-        &cobol_source,
-        &state.consensus_config,
-    )
-    .await;
-
-    match result {
-        Ok(response) => {
-            let status = response.status.clone();
-            let request_id = uuid::Uuid::new_v4().to_string();
-
-            // If consensus reached, save to S3
-            if status == "CONSENSUS_REACHED" {
-                if let Some(ref rust_code) = response.rust_code {
-                    let s3_key = format!("purple_agent/{}/output.rs", request_id);
-                    match save_to_s3(
-                        &state.s3_client,
-                        &state.s3_bucket,
-                        &s3_key,
-                        rust_code.as_str(),
-                    )
-                    .await
-                    {
-                        Ok(_) => info!("✅ Saved to S3: s3://{}/{}", state.s3_bucket, s3_key),
-                        Err(e) => warn!("S3 save failed (non-fatal): {}", e),
-                    }
-                }
-            }
-
-            info!("Request {} complete: {}", request_id, status);
-            HttpResponse::Ok().json(response)
-        }
-        Err(e) => {
-            error!("Consensus pipeline error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": e.to_string(),
-                "status": "PIPELINE_ERROR"
-            }))
-        }
-    }
+    HttpResponse::Ok().json(ReviewResponse {
+        status: fba_result.status,
+        rust_code: fba_result.rust_code,
+        confidence: fba_result.confidence,
+        bayesian_guarantee: fba_result.bayesian_guarantee,
+        k_star: fba_result.k_star,
+        semantic_similarity: fba_result.semantic_similarity,
+        node_results,
+        paper_reference: fba_result.paper_reference,
+    })
 }
 
-// ── S3 helper ─────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Health check
+// ---------------------------------------------------------------------------
 
-async fn save_to_s3(
-    client: &S3Client,
-    bucket: &str,
-    key: &str,
-    content: &str,
-) -> anyhow::Result<()> {
-    client
-        .put_object()
-        .bucket(bucket)
-        .key(key)
-        .body(content.as_bytes().to_vec().into())
-        .content_type("text/x-rustsrc")
-        .send()
-        .await
-        .map_err(|e| anyhow::anyhow!("S3 PutObject failed: {}", e))?;
-
-    Ok(())
+async fn health_handler() -> impl Responder {
+    HttpResponse::Ok().json(serde_json::json!({
+        "status": "ok",
+        "service": "purple_agent",
+        "version": "0.4.0"
+    }))
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    dotenv().ok();
-
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env().add_directive("purple_agent=info".parse().unwrap()))
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "purple_agent=info".into()),
+        )
         .init();
 
-    info!("🟣 Purple Agent v0.3.0 starting — 3-Node FBA Consensus Engine");
-    info!("   Paper: arxiv:2507.11768");
-    info!("   Node 1: Claude Opus 4.6 (Anthropic)");
-    info!("   Node 2: DeepSeek-V3-0324 (Nebius)");
-    info!("   Node 3: Llama-3.3-70B-Instruct-fast (Nebius)");
+    dotenvy::dotenv().ok();
 
-    let anthropic_key = env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set");
-    let nebius_key = env::var("NEBIUS_API_KEY").expect("NEBIUS_API_KEY must be set");
-    let s3_bucket =
-        env::var("S3_BUCKET").unwrap_or_else(|_| "mainframe-refactor-lab-venkatnagala".to_string());
-    let port: u16 = env::var("PORT")
-        .unwrap_or_else(|_| "8081".to_string())
-        .parse()
-        .expect("PORT must be a number");
+    let config = ConsensusConfig::from_toml("models.toml").map_err(|e| {
+        error!("Failed to load models.toml: {e}");
+        std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+    })?;
 
-    let consensus_config = ConsensusConfig {
-        similarity_threshold: env::var("SIMILARITY_THRESHOLD")
-            .unwrap_or_else(|_| "0.75".to_string())
-            .parse()
-            .unwrap_or(0.75),
-        confidence_threshold: env::var("CONFIDENCE_THRESHOLD")
-            .unwrap_or_else(|_| "0.85".to_string())
-            .parse()
-            .unwrap_or(0.85),
-        epsilon: env::var("BAYESIAN_EPSILON")
-            .unwrap_or_else(|_| "0.01".to_string())
-            .parse()
-            .unwrap_or(0.01),
-        theta: env::var("BAYESIAN_THETA")
-            .unwrap_or_else(|_| "2.5".to_string())
-            .parse()
-            .unwrap_or(2.5),
-    };
+    info!(node_count = config.models.len(), "Loaded ConsensusConfig from models.toml");
 
-    info!(
-        "Config: similarity_threshold={} confidence_threshold={} ε={} Θ={}",
-        consensus_config.similarity_threshold,
-        consensus_config.confidence_threshold,
-        consensus_config.epsilon,
-        consensus_config.theta
-    );
-
-    let aws_config = aws_config::load_defaults(BehaviorVersion::latest()).await;
-    let s3_client = S3Client::new(&aws_config);
+    let nebius_key = std::env::var("NEBIUS_API_KEY")
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "NEBIUS_API_KEY not set"))?;
+    let anthropic_key = std::env::var("ANTHROPIC_API_KEY")
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "ANTHROPIC_API_KEY not set"))?;
 
     let http_client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_secs(3600))
         .build()
-        .expect("Failed to build HTTP client");
+        .expect("Failed to build reqwest client");
 
-    let app_state = web::Data::new(AppState {
-        http_client,
-        s3_client,
-        s3_bucket,
-        anthropic_key,
-        nebius_key,
-        consensus_config,
+    let state = web::Data::new(WebState {
+        inner: AppState {
+            http_client,
+            nebius_key,
+            anthropic_key,
+            config,
+        },
     });
 
-    info!("🚀 Purple Agent listening on http://0.0.0.0:{}", port);
+    let addr = "0.0.0.0:8081";
+    info!("purple_agent v0.4.0 listening on {addr}");
 
     HttpServer::new(move || {
         App::new()
-            .app_data(app_state.clone())
-            .app_data(web::JsonConfig::default().error_handler(|err, _req| {
-                let response = HttpResponse::BadRequest().json(serde_json::json!({
-                    "error": err.to_string()
-                }));
-                actix_web::error::InternalError::from_response(err, response).into()
-            }))
-            .wrap(middleware::Logger::default())
-            .route("/health", web::get().to(health))
-            .route("/config", web::get().to(get_config))
-            .route("/modernize", web::post().to(modernize))
+            .app_data(state.clone())
+            .route("/modernize", web::post().to(review_handler))  // green_agent calls this
+            .route("/review",   web::post().to(review_handler))   // alias
+            .route("/health",   web::get().to(health_handler))
     })
-    .bind(("0.0.0.0", port))?
+    .keep_alive(std::time::Duration::from_secs(3600))
+    .client_request_timeout(std::time::Duration::from_secs(3600))
+    .bind(addr)?
     .run()
     .await
 }

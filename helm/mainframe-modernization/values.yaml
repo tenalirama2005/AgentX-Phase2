@@ -1,21 +1,37 @@
-# Helm values for Mainframe Modernization Pipeline
-# SOLO AI Competition 2026
-# Override with: helm upgrade --install -f values-production.yaml
+# Helm values for AgentX-Phase2 — Mainframe Modernization Pipeline
+# Author: Venkat Nagala | For the Cloud By the Cloud
+# AgentBeats Sprint 1 — March 2026
+#
+# Stack: kagent + AgentGateway + KRegistry + vind (vCluster in Docker)
+# FBA: 31-node Byzantine fault-tolerant consensus (arxiv:2507.11768)
+#
+# Deploy:
+#   helm upgrade --install agentx-phase2 ./helm/mainframe-modernization \
+#     -f helm/mainframe-modernization/values.yaml \
+#     --set secrets.anthropicApiKey=$ANTHROPIC_API_KEY \
+#     --set secrets.nebiusApiKey=$NEBIUS_API_KEY \
+#     --set secrets.awsAccessKeyId=$AWS_ACCESS_KEY_ID \
+#     --set secrets.awsSecretAccessKey=$AWS_SECRET_ACCESS_KEY \
+#     -n mainframe-modernization
 
 # ─── Global Settings ──────────────────────────────────────────────────────────
 global:
   namespace: mainframe-modernization
-  imageRegistry: "venkatnagala"
-  imageTag: "1.0.0"
+  imageRegistry: "tenalirama2026"   # Docker Hub: tenalirama2026/*
+  imageTag: "latest"                # All images built with rust:1.94
   pullPolicy: Always
 
 # ─── Agent Gateway ────────────────────────────────────────────────────────────
+# kagent + AgentGateway: JWT authentication + RBAC on every MCP call
+# Security proof: purple_agent (role: modernizer) cannot access s3_mcp
+# Only green_agent (role: orchestrator) can call s3_mcp
+# Test: ./Sprint2_deploy.ps1 -TestSecurity
 agentGateway:
   enabled: true
   replicas: 2
   image:
     repository: agent-gateway
-    tag: "1.0.0"
+    tag: "latest"
   service:
     port: 8090
     type: ClusterIP
@@ -26,27 +42,28 @@ agentGateway:
     limits:
       cpu: "500m"
       memory: "256Mi"
-  # Secrets (override with --set or values-secret.yaml)
   secrets:
-    jwtSecret: "CHANGE_ME"
+    jwtSecret: "CHANGE_ME"           # injected from .env by Sprint2_deploy.ps1
     greenAgentApiKey: "CHANGE_ME"
     purpleAgentApiKey: "CHANGE_ME"
   mcpServers:
     s3Url: "http://s3-mcp:8081"
-    geminiUrl: "http://gemini-mcp:8082"
+    aiMcpUrl: "http://ai-mcp:8082"
     cobolUrl: "http://cobol-mcp:8083"
     rustUrl: "http://rust-mcp:8084"
 
 # ─── Green Agent (Orchestrator) ───────────────────────────────────────────────
+# kagent-deployed orchestrator — owns the full COBOL→Rust pipeline
+# Roles: orchestrator — can call all MCP servers via AgentGateway
 greenAgent:
   enabled: true
   replicas: 1
   image:
     repository: green-agent
-    tag: "1.0.0"
+    tag: "latest"
   service:
     port: 8080
-    type: LoadBalancer  # Expose for external API calls
+    type: ClusterIP
   resources:
     requests:
       cpu: "250m"
@@ -54,21 +71,26 @@ greenAgent:
     limits:
       cpu: "1000m"
       memory: "1Gi"
-  aws:
-    region: "us-east-1"
+  env:
+    s3McpUrl: "http://s3-mcp:8081"
+    cobolMcpUrl: "http://cobol-mcp:8083"
+    purpleAgentUrl: "http://purple-agent:8081"
     s3Bucket: "mainframe-refactor-lab-venkatnagala"
-    useIRSA: true  # Set false to use secret-based credentials
-  irsaRoleArn: "arn:aws:iam::ACCOUNT_ID:role/mainframe-green-agent-role"
+    awsRegion: "us-east-1"
 
-# ─── Purple Agent (AI Modernizer) ─────────────────────────────────────────────
+# ─── Purple Agent (FBA Consensus Engine) ──────────────────────────────────────
+# kagent-deployed — runs 31-node Byzantine fault-tolerant consensus
+# arxiv:2507.11768 — Bayesian-in-Realization FBA guarantee
+# Roles: modernizer — can only call ai-mcp (blocked from s3_mcp, cobol_mcp, rust_mcp)
+# Listens on: 0.0.0.0:8081
 purpleAgent:
   enabled: true
   replicas: 2
   image:
     repository: purple-agent
-    tag: "1.0.0"
+    tag: "latest"
   service:
-    port: 8085
+    port: 8081        # service port (targetPort: 8081)
     type: ClusterIP
   resources:
     requests:
@@ -82,34 +104,84 @@ purpleAgent:
     minReplicas: 1
     maxReplicas: 5
     targetCPUUtilizationPercentage: 70
-  gemini:
-    model: "gemini-2.5-pro"
-    # apiKey set via secret
+  consensus:
+    modelsConfig: "models.toml"     # 31-node config — bundled in image at /app/models.toml
+    claudeModel: "claude-opus-4-6"  # 1 of 31 nodes
+    # anthropicApiKey: injected from .env
+    # nebiusApiKey:    injected from .env (30 Nebius nodes)
+
+# ─── MCP Servers ──────────────────────────────────────────────────────────────
+s3Mcp:
+  enabled: true
+  replicas: 1
+  image:
+    repository: mainframe-s3-mcp
+    tag: "latest"
+  service:
+    port: 8081
+    type: ClusterIP
+  aws:
+    region: "us-east-1"
+    s3Bucket: "mainframe-refactor-lab-venkatnagala"
+    # awsAccessKeyId:     injected from .env
+    # awsSecretAccessKey: injected from .env
+
+aiMcp:
+  enabled: true
+  replicas: 1
+  image:
+    repository: mainframe-ai-mcp
+    tag: "latest"
+  service:
+    port: 8082
+    type: ClusterIP
+  # claudeApiKey:  injected from .env
+  # nebiusApiKey:  injected from .env
+
+cobolMcp:
+  enabled: true
+  replicas: 1
+  image:
+    repository: mainframe-cobol-mcp
+    tag: "latest"
+  service:
+    port: 8083
+    type: ClusterIP
+
+rustMcp:
+  enabled: true
+  replicas: 1
+  image:
+    repository: mainframe-rust-mcp
+    tag: "latest"
+  service:
+    port: 8084
+    type: ClusterIP
 
 # ─── Network Policies ─────────────────────────────────────────────────────────
+# Zero-trust: deny all by default, allow only what is explicitly permitted
+# purple_agent → s3_mcp: BLOCKED at network level (enforced by AgentGateway RBAC)
 networkPolicies:
   enabled: true
-  defaultDenyAll: true  # Zero-trust: deny unless explicitly allowed
+  defaultDenyAll: true
 
 # ─── Monitoring ───────────────────────────────────────────────────────────────
 monitoring:
-  enabled: false  # Enable when Prometheus is available
+  enabled: false
   serviceMonitor:
     enabled: false
     interval: "30s"
 
 # ─── Ingress ──────────────────────────────────────────────────────────────────
 ingress:
-  enabled: false  # Enable for external access to Green Agent
+  enabled: false
   className: "nginx"
-  annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
   hosts:
-    - host: mainframe.example.com
+    - host: agentx.example.com
       paths:
         - path: /
           pathType: Prefix
   tls:
-    - secretName: mainframe-tls
+    - secretName: agentx-tls
       hosts:
-        - mainframe.example.com
+        - agentx.example.com

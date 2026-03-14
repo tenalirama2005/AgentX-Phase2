@@ -1,11 +1,11 @@
 [package]
-name = "rust-mcp"
+name = "rust_mcp"
 version = "1.0.0"
 edition = "2021"
 description = "Rust MCP Server - compiles and executes Rust code via Cargo"
 
 [[bin]]
-name = "rust-mcp"
+name = "rust_mcp"
 path = "src/main.rs"
 
 [dependencies]

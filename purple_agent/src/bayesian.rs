@@ -114,6 +114,7 @@ pub fn count_cobol_lines(cobol_source: &str) -> usize {
 
 /// Build the chain-of-thought prompt suffix based on k*
 /// This embeds the k* reasoning depth into the LLM prompt
+#[allow(dead_code)]
 pub fn build_cot_suffix(k_star: usize) -> String {
     format!(
         "\n\nIMPORTANT: Use exactly {k_star} reasoning steps before producing \

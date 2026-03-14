@@ -1,5 +1,5 @@
 # Multi-stage build for minimal image size
-FROM rust:latest AS builder
+FROM rust:1.94 AS builder
 
 WORKDIR /app
 
@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-COPY --from=builder /app/target/release/agent-gateway .
+COPY --from=builder /app/target/release/agent_gateway .
 
 # Non-root user for security
 RUN useradd -r -s /bin/false gateway
@@ -39,4 +39,4 @@ EXPOSE 8090
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD bash -c 'echo > /dev/tcp/localhost/8090' || exit 1
 
-CMD ["./agent-gateway"]
+CMD ["./agent_gateway"]

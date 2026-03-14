@@ -1,11 +1,11 @@
 [package]
-name = "cobol-mcp"
+name = "cobol_mcp"
 version = "1.0.0"
 edition = "2021"
 description = "COBOL MCP Server - compiles and executes COBOL via GnuCOBOL"
 
 [[bin]]
-name = "cobol-mcp"
+name = "cobol_mcp"
 path = "src/main.rs"
 
 [dependencies]

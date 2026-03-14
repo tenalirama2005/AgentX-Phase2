@@ -1,0 +1,405 @@
+# ============================================================
+# AgentX Phase 2 — FBA Consensus Model Registry
+# 31-Node Federated Byzantine Agreement Network
+# Based on: arxiv:2507.11768
+#
+# Quorum: 2/3 of responding nodes must agree (≥21/31)
+# Provider A: Anthropic (Claude)
+# Provider B: Nebius Token Factory (all others)
+# API: https://api.tokenfactory.nebius.com/v1/chat/completions
+# ============================================================
+
+[network]
+quorum_threshold    = 0.667   # 2/3 of responding nodes must agree
+similarity_threshold = 0.75   # semantic similarity for code agreement
+confidence_threshold = 0.80   # minimum per-node confidence
+pass1_max_tokens    = 1024    # reasoning pass — all nodes
+description         = "31-node FBA consensus for COBOL→Rust modernization"
+
+# ============================================================
+# ANCHOR NODES — Highest capability, proprietary APIs
+# ============================================================
+
+[[models]]
+node_id     = "claude_opus_4_6"
+model_name  = "Claude Opus 4.6"
+provider    = "anthropic"
+model_id    = "claude-opus-4-6"
+pass2_max_tokens = 1500
+temperature = 0.1
+family      = "claude"
+tier        = "anchor"
+cost_input  = 15.00   # $/1M tokens
+cost_output = 75.00
+
+# ============================================================
+# TIER 1 — Large frontier models (70B+)
+# ============================================================
+
+[[models]]
+node_id     = "deepseek_v3_2"
+model_name  = "DeepSeek-V3.2 (Nebius)"
+provider    = "nebius"
+model_id    = "deepseek-ai/DeepSeek-V3.2"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "deepseek"
+tier        = "tier1"
+cost_input  = 0.30
+cost_output = 0.45
+
+[[models]]
+node_id     = "deepseek_v3_0324"
+model_name  = "DeepSeek-V3-0324 (Nebius)"
+provider    = "nebius"
+model_id    = "deepseek-ai/DeepSeek-V3-0324"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "deepseek"
+tier        = "tier1"
+cost_input  = 0.50
+cost_output = 2.00
+
+[[models]]
+node_id     = "deepseek_r1_0528"
+model_name  = "DeepSeek-R1-0528 (Nebius)"
+provider    = "nebius"
+model_id    = "deepseek-ai/DeepSeek-R1-0528"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "deepseek"
+tier        = "tier1"
+cost_input  = 0.80
+cost_output = 2.00
+
+[[models]]
+node_id     = "llama_3_3_70b"
+model_name  = "Llama-3.3-70B-Instruct (Nebius)"
+provider    = "nebius"
+model_id    = "meta-llama/Llama-3.3-70B-Instruct"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "llama"
+tier        = "tier1"
+cost_input  = 0.13
+cost_output = 0.40
+
+[[models]]
+node_id     = "llama_3_3_70b_fast"
+model_name  = "Llama-3.3-70B-Instruct-fast (Nebius)"
+provider    = "nebius"
+model_id    = "meta-llama/Llama-3.3-70B-Instruct-fast"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "llama"
+tier        = "tier1"
+cost_input  = 0.25
+cost_output = 0.75
+
+[[models]]
+node_id     = "qwen3_235b"
+model_name  = "Qwen3-235B-A22B-Instruct (Nebius)"
+provider    = "nebius"
+model_id    = "Qwen/Qwen3-235B-A22B-Instruct-2507"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "qwen"
+tier        = "tier1"
+cost_input  = 0.20
+cost_output = 0.60
+
+[[models]]
+node_id     = "qwen3_235b_thinking"
+model_name  = "Qwen3-235B-A22B-Thinking (Nebius)"
+provider    = "nebius"
+model_id    = "Qwen/Qwen3-235B-A22B-Thinking-2507"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "qwen"
+tier        = "tier1"
+cost_input  = 0.20
+cost_output = 0.80
+
+[[models]]
+node_id     = "qwen3_coder_480b"
+model_name  = "Qwen3-Coder-480B-A35B (Nebius)"
+provider    = "nebius"
+model_id    = "Qwen/Qwen3-Coder-480B-A35B-Instruct"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "qwen"
+tier        = "tier1"
+cost_input  = 0.40
+cost_output = 2.00
+
+[[models]]
+node_id     = "hermes4_405b"
+model_name  = "Hermes-4-405B (Nebius)"
+provider    = "nebius"
+model_id    = "NousResearch/Hermes-4-405B"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "hermes"
+tier        = "tier1"
+cost_input  = 1.00
+cost_output = 3.00
+
+[[models]]
+node_id     = "llama_nemotron_253b"
+model_name  = "Llama-3.1-Nemotron-Ultra-253B (Nebius)"
+provider    = "nebius"
+model_id    = "nvidia/Llama-3_1-Nemotron-Ultra-253B-v1"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "nemotron"
+tier        = "tier1"
+cost_input  = 0.60
+cost_output = 2.00
+
+[[models]]
+node_id     = "kimi_k2"
+model_name  = "Kimi-K2-Instruct (Nebius)"
+provider    = "nebius"
+model_id    = "moonshotai/Kimi-K2-Instruct"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "kimi"
+tier        = "tier1"
+cost_input  = 0.50
+cost_output = 2.00
+
+[[models]]
+node_id     = "kimi_k2_5"
+model_name  = "Kimi-K2.5 (Nebius)"
+provider    = "nebius"
+model_id    = "moonshotai/Kimi-K2.5"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "kimi"
+tier        = "tier1"
+cost_input  = 0.50
+cost_output = 3.00
+
+[[models]]
+node_id     = "glm_4_5"
+model_name  = "GLM-4.5 (Nebius)"
+provider    = "nebius"
+model_id    = "zai-org/GLM-4.5"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "glm"
+tier        = "tier1"
+cost_input  = 0.60
+cost_output = 2.00
+
+[[models]]
+node_id     = "gpt_oss_120b"
+model_name  = "GPT-OSS-120B (Nebius)"
+provider    = "nebius"
+model_id    = "openai/gpt-oss-120b"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "gpt_oss"
+tier        = "tier1"
+cost_input  = 0.15
+cost_output = 0.60
+
+# ============================================================
+# TIER 2 — Mid-size models (7B–32B)
+# ============================================================
+
+[[models]]
+node_id     = "qwen3_32b"
+model_name  = "Qwen3-32B (Nebius)"
+provider    = "nebius"
+model_id    = "Qwen/Qwen3-32B"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "qwen"
+tier        = "tier2"
+cost_input  = 0.10
+cost_output = 0.30
+
+[[models]]
+node_id     = "qwen3_30b"
+model_name  = "Qwen3-30B-A3B-Instruct (Nebius)"
+provider    = "nebius"
+model_id    = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "qwen"
+tier        = "tier2"
+cost_input  = 0.10
+cost_output = 0.30
+
+[[models]]
+node_id     = "qwen3_coder_30b"
+model_name  = "Qwen3-Coder-30B-A3B (Nebius)"
+provider    = "nebius"
+model_id    = "Qwen/Qwen3-Coder-30B-A3B-Instruct"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "qwen"
+tier        = "tier2"
+cost_input  = 0.10
+cost_output = 0.30
+
+[[models]]
+node_id     = "hermes4_70b"
+model_name  = "Hermes-4-70B (Nebius)"
+provider    = "nebius"
+model_id    = "NousResearch/Hermes-4-70B"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "hermes"
+tier        = "tier2"
+cost_input  = 0.13
+cost_output = 0.40
+
+[[models]]
+node_id     = "minimax_m2_1"
+model_name  = "MiniMax-M2.1 (Nebius)"
+provider    = "nebius"
+model_id    = "MiniMaxAI/MiniMax-M2.1"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "minimax"
+tier        = "tier2"
+cost_input  = 0.30
+cost_output = 1.00
+
+[[models]]
+node_id     = "gemma3_27b"
+model_name  = "Gemma-3-27B-IT (Nebius)"
+provider    = "nebius"
+model_id    = "google/gemma-3-27b-it"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "gemma"
+tier        = "tier2"
+cost_input  = 0.10
+cost_output = 0.30
+
+[[models]]
+node_id     = "intellect3_106b"
+model_name  = "INTELLECT-3-106B (Nebius)"
+provider    = "nebius"
+model_id    = "PrimeIntellect/INTELLECT-3"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "intellect"
+tier        = "tier2"
+cost_input  = 0.20
+cost_output = 1.00
+
+[[models]]
+node_id     = "glm_4_5_air"
+model_name  = "GLM-4.5-Air (Nebius)"
+provider    = "nebius"
+model_id    = "zai-org/GLM-4.5-Air"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "glm"
+tier        = "tier2"
+cost_input  = 0.20
+cost_output = 1.00
+
+[[models]]
+node_id     = "glm_4_7_fp8"
+model_name  = "GLM-4.7-FP8 (Nebius)"
+provider    = "nebius"
+model_id    = "zai-org/GLM-4.7-FP8"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "glm"
+tier        = "tier2"
+cost_input  = 0.40
+cost_output = 2.00
+
+[[models]]
+node_id     = "nemotron_nano_30b"
+model_name  = "NVIDIA-Nemotron-Nano-30B (Nebius)"
+provider    = "nebius"
+model_id    = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "nemotron"
+tier        = "tier2"
+cost_input  = 0.06
+cost_output = 0.24
+
+[[models]]
+node_id     = "gpt_oss_20b"
+model_name  = "GPT-OSS-20B (Nebius)"
+provider    = "nebius"
+model_id    = "openai/gpt-oss-20b"
+pass2_max_tokens = 8192
+temperature = 0.1
+family      = "gpt_oss"
+tier        = "tier2"
+cost_input  = 0.05
+cost_output = 0.20
+
+# ============================================================
+# TIER 3 — Efficient small models (8B–12B)
+# ============================================================
+
+[[models]]
+node_id     = "llama_3_1_8b"
+model_name  = "Meta-Llama-3.1-8B-Instruct (Nebius)"
+provider    = "nebius"
+model_id    = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+pass2_max_tokens = 4096
+temperature = 0.1
+family      = "llama"
+tier        = "tier3"
+cost_input  = 0.02
+cost_output = 0.06
+
+[[models]]
+node_id     = "llama_3_1_8b_fast"
+model_name  = "Meta-Llama-3.1-8B-Instruct-fast (Nebius)"
+provider    = "nebius"
+model_id    = "meta-llama/Meta-Llama-3.1-8B-Instruct-fast"
+pass2_max_tokens = 4096
+temperature = 0.1
+family      = "llama"
+tier        = "tier3"
+cost_input  = 0.03
+cost_output = 0.09
+
+[[models]]
+node_id     = "nemotron_nano_12b"
+model_name  = "Nemotron-Nano-V2-12B (Nebius)"
+provider    = "nebius"
+model_id    = "nvidia/Nemotron-Nano-V2-12b"
+pass2_max_tokens = 4096
+temperature = 0.1
+family      = "nemotron"
+tier        = "tier3"
+cost_input  = 0.07
+cost_output = 0.20
+
+[[models]]
+node_id     = "qwen2_5_coder_7b"
+model_name  = "Qwen2.5-Coder-7B (Nebius)"
+provider    = "nebius"
+model_id    = "Qwen/Qwen2.5-Coder-7B-fast"
+pass2_max_tokens = 4096
+temperature = 0.1
+family      = "qwen"
+tier        = "tier3"
+cost_input  = 0.03
+cost_output = 0.09
+
+[[models]]
+node_id     = "gemma2_9b"
+model_name  = "Gemma-2-9B-IT-fast (Nebius)"
+provider    = "nebius"
+model_id    = "google/gemma-2-9b-it-fast"
+pass2_max_tokens = 4096
+temperature = 0.1
+family      = "gemma"
+tier        = "tier3"
+cost_input  = 0.03
+cost_output = 0.09

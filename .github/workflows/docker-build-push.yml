@@ -14,19 +14,19 @@ jobs:
     strategy:
       matrix:
         service:
-          - name: agent-gateway
+          - name: agent_gateway
             context: ./agent_gateway
-          - name: ai-mcp
+          - name: ai_mcp
             context: ./ai_mcp
-          - name: cobol-mcp
+          - name: cobol_mcp
             context: ./cobol_mcp
-          - name: rust-mcp
+          - name: rust_mcp
             context: ./rust_mcp
-          - name: s3-mcp
+          - name: s3_mcp
             context: ./s3_mcp
-          - name: green-agent
+          - name: green_agent
             context: ./green_agent
-          - name: purple-agent
+          - name: purple_agent
             context: ./purple_agent
 
     steps:

@@ -128,7 +128,7 @@ impl McpRegistry {
         servers.insert(
             "s3_mcp".to_string(),
             McpServer {
-                url: std::env::var("S3_MCP_URL").unwrap_or("http://s3-mcp:8081".to_string()),
+                url: std::env::var("S3_MCP_URL").unwrap_or("http://s3_mcp:8081".to_string()),
                 allowed_operations: s3_ops,
             },
         );
@@ -153,7 +153,7 @@ impl McpRegistry {
         servers.insert(
             "ai_mcp".to_string(),
             McpServer {
-                url: std::env::var("AI_MCP_URL").unwrap_or("http://ai-mcp:8082".to_string()),
+                url: std::env::var("AI_MCP_URL").unwrap_or("http://ai_mcp:8082".to_string()),
                 allowed_operations: ai_ops,
             },
         );
@@ -171,7 +171,7 @@ impl McpRegistry {
         servers.insert(
             "cobol_mcp".to_string(),
             McpServer {
-                url: std::env::var("COBOL_MCP_URL").unwrap_or("http://cobol-mcp:8083".to_string()),
+                url: std::env::var("COBOL_MCP_URL").unwrap_or("http://cobol_mcp:8083".to_string()),
                 allowed_operations: cobol_ops,
             },
         );
@@ -190,7 +190,7 @@ impl McpRegistry {
         servers.insert(
             "rust_mcp".to_string(),
             McpServer {
-                url: std::env::var("RUST_MCP_URL").unwrap_or("http://rust-mcp:8084".to_string()),
+                url: std::env::var("RUST_MCP_URL").unwrap_or("http://rust_mcp:8084".to_string()),
                 allowed_operations: rust_ops,
             },
         );
@@ -490,7 +490,7 @@ async fn call_mcp_server(
     let response = client
         .post(format!("{}/{}", url, operation))
         .header("X-Request-ID", request_id)
-        .header("X-Gateway", "agent-gateway/1.0")
+        .header("X-Gateway", "agent_gateway/1.0")
         .json(payload)
         .send()
         .await

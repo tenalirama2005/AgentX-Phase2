@@ -7,7 +7,7 @@ use actix_web::{web, App, HttpResponse, HttpServer};
 async fn health() -> HttpResponse {
     HttpResponse::Ok().json(serde_json::json!({
         "status": "healthy",
-        "service": "ai-mcp",
+        "service": "ai_mcp",
         "version": "1.0.0",
         "note": "Deprecated — replaced by purple_agent FBA consensus"
     }))

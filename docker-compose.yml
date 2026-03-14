@@ -5,7 +5,7 @@ services:
     build:
       context: ./agent_gateway
       dockerfile: Dockerfile
-    container_name: agent-gateway
+    container_name: agent_gateway
     ports:
       - "8090:8090"
     env_file: .env
@@ -45,7 +45,7 @@ services:
       - BIND_ADDR=0.0.0.0:8081
       - RUST_LOG=info
     depends_on:
-      - agent-gateway
+      - agent_gateway
     networks:
       - modernization-network
     restart: always
@@ -57,11 +57,11 @@ services:
       start_period: 40s
 
   # 🧠 ai MCP - AI translation via Claude claude-opus-4-6
-  ai-mcp:
+  ai_mcp:
     build:
       context: ./ai_mcp
       dockerfile: Dockerfile
-    container_name: ai-mcp
+    container_name: ai_mcp
     ports:
       - "8087:8082"
     env_file: .env
@@ -70,7 +70,7 @@ services:
       - BIND_ADDR=0.0.0.0:8082
       - RUST_LOG=info
     depends_on:
-      - agent-gateway
+      - agent_gateway
     networks:
       - modernization-network
     restart: always
@@ -86,14 +86,14 @@ services:
     build:
       context: ./cobol_mcp
       dockerfile: Dockerfile
-    container_name: cobol-mcp
+    container_name: cobol_mcp
     ports:
       - "8088:8083"
     environment:
       - BIND_ADDR=0.0.0.0:8083
       - RUST_LOG=info
     depends_on:
-      - agent-gateway
+      - agent_gateway
     networks:
       - modernization-network
     restart: always
@@ -109,14 +109,14 @@ services:
     build:
       context: ./rust_mcp
       dockerfile: Dockerfile
-    container_name: rust-mcp
+    container_name: rust_mcp
     ports:
       - "8089:8084"
     environment:
       - BIND_ADDR=0.0.0.0:8084
       - RUST_LOG=info
     depends_on:
-      - agent-gateway
+      - agent_gateway
     networks:
       - modernization-network
     restart: always
@@ -132,13 +132,13 @@ services:
     build:
       context: ./purple_agent
       dockerfile: Dockerfile
-    container_name: purple-agent
+    container_name: purple_agent
     ports:
       - "8085:8081"
     env_file: .env
     depends_on:
-      - agent-gateway
-      - ai-mcp
+      - agent_gateway
+      - ai_mcp
     networks:
       - modernization-network
     restart: always
@@ -167,12 +167,12 @@ services:
       - AGENT_ID=green_agent
       - AGENT_API_KEY=${AGENT_API_KEY:-green-agent-dev-key-change-in-prod}
     depends_on:
-      - agent-gateway
-      - s3-mcp
-      - ai-mcp
-      - cobol-mcp
-      - rust-mcp
-      - purple-agent
+      - agent_gateway
+      - s3_mcp
+      - ai_mcp
+      - cobol_mcp
+      - rust_mcp
+      - purple_agent
     networks:
       - modernization-network
     restart: always

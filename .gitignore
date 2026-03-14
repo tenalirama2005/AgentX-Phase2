@@ -21,3 +21,14 @@ target
 #.idea/
 
 .env
+
+# Logs and debug files
+logs/
+*.log
+purple_agent_debug.log
+
+# FBA report outputs (generated at runtime)
+fba_report_latest.json
+
+# vind temp files
+agentx-vind.yaml

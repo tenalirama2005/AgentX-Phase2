@@ -1,4 +1,4 @@
-FROM rust:latest AS builder
+FROM rust:1.94 AS builder
 
 WORKDIR /app
 
@@ -15,7 +15,7 @@ COPY src ./src
 RUN touch src/main.rs && cargo build --release
 
 # Runtime stage - keep full Rust toolchain for compiling user code
-FROM rust:latest
+FROM rust:1.94
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl-dev \
@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --from=builder /app/target/release/rust-mcp .
+COPY --from=builder /app/target/release/rust_mcp .
 
 # Pre-warm cargo registry cache
 
@@ -37,4 +37,4 @@ EXPOSE 8084
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD bash -c 'echo > /dev/tcp/localhost/8084' || exit 1
 
-CMD ["./rust-mcp"]
+CMD ["./rust_mcp"]

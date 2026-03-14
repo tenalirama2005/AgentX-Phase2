@@ -1,11 +1,11 @@
 [package]
-name = "agent-gateway"
+name = "agent_gateway"
 version = "1.0.0"
 edition = "2021"
 description = "Authentication & Authorization gateway for MCP servers - Mainframe Modernization Pipeline"
 
 [[bin]]
-name = "agent-gateway"
+name = "agent_gateway"
 path = "src/main.rs"
 
 [dependencies]

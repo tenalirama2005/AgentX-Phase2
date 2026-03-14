@@ -90,3 +90,12 @@ roleRef:
   kind: Role
   apiGroup: rbac.authorization.k8s.io
   name: purple-agent-role
+---
+# ServiceAccount for all MCP servers (they have no K8s API access)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-sa
+  namespace: mainframe-modernization
+  labels:
+    app: mcp-server

@@ -232,7 +232,7 @@ async fn list_objects(state: web::Data<AppState>, body: web::Json<ListRequest>) 
 async fn health() -> HttpResponse {
     HttpResponse::Ok().json(serde_json::json!({
         "status": "healthy",
-        "service": "s3-mcp",
+        "service": "s3_mcp",
         "version": "1.0.0"
     }))
 }

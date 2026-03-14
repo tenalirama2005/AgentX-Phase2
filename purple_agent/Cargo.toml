@@ -9,6 +9,7 @@ name = "purple_agent"
 path = "src/main.rs"
 
 [dependencies]
+toml = "0.8"
 # Web server
 actix-web = "4"
 actix-rt = "2"

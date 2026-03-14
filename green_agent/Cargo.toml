@@ -19,3 +19,9 @@ chrono = "0.4"
 dotenvy = "0.15"
 log = "0.4"
 env_logger = "0.10"
+[dependencies.uuid]
+version = "1.22.0"
+# Lets you generate random UUIDs
+features = [
+    "v4",
+]

@@ -32,7 +32,7 @@ spec:
         fsGroup: 65534
       containers:
         - name: agent-gateway
-          image: venkatnagala/agent-gateway:1.0.0
+          image: tenalirama2026/agent-gateway:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8090

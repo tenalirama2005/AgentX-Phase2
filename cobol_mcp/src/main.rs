@@ -10,6 +10,7 @@ use actix_web::{web, App, HttpServer, HttpResponse, middleware};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::fs;
+use std::env;
 use uuid::Uuid;
 use log::{info, error};
 
@@ -17,14 +18,14 @@ use log::{info, error};
 
 #[derive(Deserialize)]
 pub struct CompileRequest {
-    pub source: String,           // COBOL source code
-    pub input_data: Option<String>, // Optional stdin input
+    pub source: String,
+    pub input_data: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct CompileResponse {
     pub success: bool,
-    pub output: Option<String>,   // Execution output
+    pub output: Option<String>,
     pub compile_log: Option<String>,
     pub error: Option<String>,
 }
@@ -41,36 +42,37 @@ pub struct ValidateResponse {
     pub warnings: Vec<String>,
 }
 
+// ─── Cross-platform temp dir ──────────────────────────────────────────────────
+
+fn get_work_dir(prefix: &str) -> String {
+    let job_id = Uuid::new_v4().to_string();
+    let tmp = env::temp_dir();  // C:\Users\<user>\AppData\Local\Temp on Windows
+    tmp.join(format!("{}_{}", prefix, job_id))
+        .to_string_lossy()
+        .to_string()
+}
+
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
-/// Compile COBOL source and execute it, returning stdout output
-async fn compile(
-    body: web::Json<CompileRequest>,
-) -> HttpResponse {
-    let job_id = Uuid::new_v4().to_string();
-    let work_dir = format!("/tmp/cobol_{}", job_id);
-
+async fn compile(body: web::Json<CompileRequest>) -> HttpResponse {
+    let work_dir = get_work_dir("cobol");
+    let job_id = &work_dir[work_dir.rfind('_').unwrap_or(0) + 1..];
     info!("Compiling COBOL job: {}", job_id);
 
-    // Create working directory
     if let Err(e) = fs::create_dir_all(&work_dir) {
         return HttpResponse::InternalServerError().json(CompileResponse {
-            success: false,
-            output: None,
-            compile_log: None,
+            success: false, output: None, compile_log: None,
             error: Some(format!("Failed to create work dir: {}", e)),
         });
     }
 
     let source_path = format!("{}/program.cbl", work_dir);
+    // On Windows, binary gets .exe extension automatically
     let binary_path = format!("{}/program", work_dir);
 
-    // Write COBOL source
     if let Err(e) = fs::write(&source_path, &body.source) {
         return HttpResponse::InternalServerError().json(CompileResponse {
-            success: false,
-            output: None,
-            compile_log: None,
+            success: false, output: None, compile_log: None,
             error: Some(format!("Failed to write source: {}", e)),
         });
     }
@@ -88,8 +90,7 @@ async fn compile(
                 error!("COBOL compile failed: {}", compile_log);
                 cleanup(&work_dir);
                 return HttpResponse::Ok().json(CompileResponse {
-                    success: false,
-                    output: None,
+                    success: false, output: None,
                     compile_log: Some(compile_log),
                     error: Some("COBOL compilation failed".to_string()),
                 });
@@ -97,25 +98,26 @@ async fn compile(
 
             info!("COBOL compiled successfully, executing...");
 
-            // Execute the compiled binary
-            let mut exec_cmd = Command::new(&binary_path);
+            // On Windows the binary is program.exe
+            #[cfg(target_os = "windows")]
+            let exec_path = format!("{}/program.exe", work_dir);
+            #[cfg(not(target_os = "windows"))]
+            let exec_path = binary_path.clone();
 
-            // Provide input data if available
+            let mut exec_cmd = Command::new(&exec_path);
+
             if let Some(input) = &body.input_data {
                 use std::process::Stdio;
                 use std::io::Write;
 
-                let child = exec_cmd
+                match exec_cmd
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .spawn()
-                    .map_err(|e| e.to_string());
-
-                match child {
+                {
                     Ok(mut c) => {
-                        if let Some(stdin) = c.stdin.take() {
-                            let mut stdin = stdin;
+                        if let Some(mut stdin) = c.stdin.take() {
                             let _ = stdin.write_all(input.as_bytes());
                         }
                         match c.wait_with_output() {
@@ -133,8 +135,7 @@ async fn compile(
                             Err(e) => {
                                 cleanup(&work_dir);
                                 return HttpResponse::InternalServerError().json(CompileResponse {
-                                    success: false,
-                                    output: None,
+                                    success: false, output: None,
                                     compile_log: Some(compile_log),
                                     error: Some(format!("Execution failed: {}", e)),
                                 });
@@ -144,8 +145,7 @@ async fn compile(
                     Err(e) => {
                         cleanup(&work_dir);
                         return HttpResponse::InternalServerError().json(CompileResponse {
-                            success: false,
-                            output: None,
+                            success: false, output: None,
                             compile_log: Some(compile_log),
                             error: Some(format!("Failed to spawn process: {}", e)),
                         });
@@ -169,8 +169,7 @@ async fn compile(
                 Err(e) => {
                     cleanup(&work_dir);
                     HttpResponse::InternalServerError().json(CompileResponse {
-                        success: false,
-                        output: None,
+                        success: false, output: None,
                         compile_log: Some(compile_log),
                         error: Some(format!("Execution failed: {}", e)),
                     })
@@ -181,27 +180,19 @@ async fn compile(
             error!("Failed to run cobc: {}", e);
             cleanup(&work_dir);
             HttpResponse::InternalServerError().json(CompileResponse {
-                success: false,
-                output: None,
-                compile_log: None,
+                success: false, output: None, compile_log: None,
                 error: Some(format!("cobc not found or failed: {}", e)),
             })
         }
     }
 }
 
-/// Validate COBOL syntax without executing
-async fn validate_syntax(
-    body: web::Json<ValidateRequest>,
-) -> HttpResponse {
-    let job_id = Uuid::new_v4().to_string();
-    let work_dir = format!("/tmp/cobol_validate_{}", job_id);
+async fn validate_syntax(body: web::Json<ValidateRequest>) -> HttpResponse {
+    let work_dir = get_work_dir("cobol_validate");
     let _ = fs::create_dir_all(&work_dir);
-
     let source_path = format!("{}/program.cbl", work_dir);
     let _ = fs::write(&source_path, &body.source);
 
-    // Use -fsyntax-only flag
     let result = Command::new("cobc")
         .args(["-fsyntax-only", &source_path])
         .output();
@@ -213,16 +204,10 @@ async fn validate_syntax(
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let valid = output.status.success();
             let errors: Vec<String> = if !valid {
-                stderr.lines()
-                    .filter(|l| l.contains("error"))
-                    .map(String::from)
-                    .collect()
+                stderr.lines().filter(|l| l.contains("error")).map(String::from).collect()
             } else { vec![] };
             let warnings: Vec<String> = stderr.lines()
-                .filter(|l| l.contains("warning"))
-                .map(String::from)
-                .collect();
-
+                .filter(|l| l.contains("warning")).map(String::from).collect();
             HttpResponse::Ok().json(ValidateResponse { valid, errors, warnings })
         }
         Err(e) => HttpResponse::InternalServerError().json(ValidateResponse {
@@ -234,11 +219,10 @@ async fn validate_syntax(
 }
 
 async fn health() -> HttpResponse {
-    // Check if GnuCOBOL is available
     let cobc_available = Command::new("cobc").arg("--version").output().is_ok();
     HttpResponse::Ok().json(serde_json::json!({
         "status": "healthy",
-        "service": "cobol-mcp",
+        "service": "cobol_mcp",        // ← snake_case per naming convention
         "version": "1.0.0",
         "gnucobol_available": cobc_available
     }))
@@ -255,15 +239,15 @@ async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
     let bind_addr = std::env::var("BIND_ADDR").unwrap_or("0.0.0.0:8083".to_string());
-    info!("⚙️  COBOL MCP Service starting on {}", bind_addr);
+    info!("⚙️  cobol_mcp starting on {}", bind_addr);
 
     HttpServer::new(|| {
         App::new()
             .wrap(middleware::Logger::default())
-            .route("/compile", web::post().to(compile))
-            .route("/execute", web::post().to(compile)) // same handler
+            .route("/compile",         web::post().to(compile))
+            .route("/execute",         web::post().to(compile))
             .route("/validate_syntax", web::post().to(validate_syntax))
-            .route("/health", web::get().to(health))
+            .route("/health",          web::get().to(health))
     })
     .bind(&bind_addr)?
     .run()
