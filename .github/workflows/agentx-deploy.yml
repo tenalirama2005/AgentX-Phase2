@@ -46,6 +46,7 @@ jobs:
         uses: azure/setup-helm@v3
         with:
           version: 'latest'
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       # ── Docker login ─────────────────────────────────────────
       - name: Login to Docker Hub
@@ -70,17 +71,6 @@ jobs:
             --driver docker \
             --values /tmp/vind-config.yaml
           kubectl get nodes
-
-      # ── Install vCluster Platform UI ─────────────────────────
-      - name: Install vCluster Platform UI
-        run: |
-          vcluster platform start
-          echo "Waiting for loft pod..."
-          kubectl wait --for=condition=ready pod \
-            -l app=loft \
-            -n vcluster-platform \
-            --timeout=120s || true
-          kubectl get pods -n vcluster-platform
 
       # ── Inject secrets ───────────────────────────────────────
       - name: Create namespace
