@@ -72,6 +72,19 @@ jobs:
             --values /tmp/vind-config.yaml
           kubectl get nodes
 
+      # ── Install vCluster Platform UI ─────────────────────────
+      - name: Install vCluster Platform UI
+        run: |
+          echo "Installing vCluster Platform UI..."
+          vcluster platform start --reset || vcluster platform start
+          echo "Waiting for loft pod (up to 120s)..."
+          kubectl wait --for=condition=ready pod             -l app=loft             -n vcluster-platform             --timeout=120s || true
+          echo "=== vCluster Platform Pods ==="
+          kubectl get pods -n vcluster-platform || true
+          echo "=== vCluster Platform Services ==="
+          kubectl get svc -n vcluster-platform || true
+        continue-on-error: true
+
       # ── Inject secrets ───────────────────────────────────────
       - name: Create namespace
         run: |
@@ -121,10 +134,12 @@ jobs:
       - name: Wait for all pods to be ready
         run: |
           echo "Waiting for deployments..."
+          echo "Giving pods 60s to start pulling images..."
+          sleep 60
           for d in agent-gateway s3-mcp cobol-mcp ai-mcp rust-mcp purple-agent green-agent; do
             echo "Waiting: $d..."
             kubectl rollout status deployment/$d \
-              -n $NAMESPACE --timeout=300s
+              -n $NAMESPACE --timeout=600s
           done
           echo ""
           echo "=== Pod Status ==="
