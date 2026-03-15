@@ -3,20 +3,18 @@
 # Author: Venkat Nagala | For the Cloud By the Cloud
 #
 # vind = vCluster in Docker — KinD replacement with:
-#   ✅ LoadBalancer works out of the box
-#   ✅ Free vCluster Platform UI (accessible from anywhere)
-#   ✅ Sleep/wake cluster
-#   ✅ Add EC2/GPU nodes via VPN
-#   ✅ Pull-through Docker registry cache
+#   LoadBalancer works out of the box
+#   Free vCluster Platform UI (accessible from anywhere)
+#   Sleep/wake cluster
+#   Add EC2/GPU nodes via VPN
+#   Pull-through Docker registry cache
 #   GitHub: https://github.com/loft-sh/vind
 #
 # Prerequisites:
 #   1. Docker Desktop running (Kubernetes NOT required)
-#   2. vCluster CLI installed:
-#      winget install loft-sh.vcluster
-#      # winget does NOT add to PATH — run once as Administrator:
-#      $exe = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\loft-sh.vcluster*" `
-#        -Recurse -Filter "vcluster.exe" | Select-Object -First 1 -ExpandProperty FullName
+#   2. vCluster CLI: winget install loft-sh.vcluster
+#      Then as Administrator:
+#      $exe = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\loft-sh.vcluster*" -Recurse -Filter "vcluster.exe" | Select-Object -First 1 -ExpandProperty FullName
 #      Copy-Item $exe "C:\Windows\System32\vcluster.exe"
 #   3. .env file with real API keys in project root
 #
@@ -24,22 +22,23 @@
 #   ./Sprint2_deploy.ps1                  # connect cluster + deploy
 #   ./Sprint2_deploy.ps1 -BuildImages     # build+push Docker images first
 #   ./Sprint2_deploy.ps1 -RunPipeline     # run pipeline + show FBA node results
+#   ./Sprint2_deploy.ps1 -TestSecurity    # prove JWT RBAC blocks purple_agent
 #   ./Sprint2_deploy.ps1 -Status          # pod status
-#   ./Sprint2_deploy.ps1 -Sleep           # sleep the cluster (saves resources)
+#   ./Sprint2_deploy.ps1 -Sleep           # sleep the cluster
 #   ./Sprint2_deploy.ps1 -Wake            # wake the cluster
-#   ./Sprint2_deploy.ps1 -Teardown        # delete cluster entirely
+#   ./Sprint2_deploy.ps1 -Teardown        # delete cluster
 #   ./Sprint2_deploy.ps1 -UI              # open vCluster Platform UI
 # ============================================================
 
 param(
     [switch]$BuildImages,
     [switch]$RunPipeline,
+    [switch]$TestSecurity,
     [switch]$Status,
     [switch]$Sleep,
     [switch]$Wake,
     [switch]$Teardown,
-    [switch]$UI,
-    [switch]$TestSecurity
+    [switch]$UI
 )
 
 $CLUSTER_NAME = "agentx-phase2"
@@ -55,36 +54,41 @@ function Cyan($m)   { Write-Host $m -ForegroundColor Cyan   }
 
 # ── Status ───────────────────────────────────────────────────
 if ($Status) {
-    Cyan "`n=== AgentX-Phase2 Pod Status (vind cluster: $CLUSTER_NAME) ==="
+    Cyan "`n=== AgentX-Phase2 Pod Status ==="
     kubectl get pods -n $NAMESPACE -o wide
-    kubectl get svc   -n $NAMESPACE
+    kubectl get svc -n $NAMESPACE
     exit 0
 }
 
 # ── Sleep ────────────────────────────────────────────────────
 if ($Sleep) {
-    Yellow "Sleeping vind cluster '$CLUSTER_NAME' (saves CPU/memory)..."
-    vcluster sleep $CLUSTER_NAME
+    Yellow "Sleeping vind cluster '$CLUSTER_NAME' (stops Docker container)..."
+    docker stop vcluster.cp.$CLUSTER_NAME
+    if ($LASTEXITCODE -ne 0) { Red "  Failed to sleep cluster."; exit 1 }
     Green "Cluster sleeping. Run ./Sprint2_deploy.ps1 -Wake to resume."
     exit 0
 }
 
 # ── Wake ─────────────────────────────────────────────────────
 if ($Wake) {
-    Yellow "Waking vind cluster '$CLUSTER_NAME'..."
-    vcluster wakeup $CLUSTER_NAME
-    if ($LASTEXITCODE -ne 0) { Red "  Wake failed."; exit 1 }
-    Green "Cluster awake."
+    Yellow "Waking vind cluster '$CLUSTER_NAME' (starts Docker container)..."
+    docker start vcluster.cp.$CLUSTER_NAME
+    if ($LASTEXITCODE -ne 0) { Red "  Failed to wake cluster."; exit 1 }
     Start-Sleep -Seconds 5
     vcluster connect $CLUSTER_NAME --driver docker
+    if ($LASTEXITCODE -ne 0) { Red "  Failed to connect."; exit 1 }
+    Green "Cluster awake and connected."
     exit 0
 }
 
 # ── UI ───────────────────────────────────────────────────────
 if ($UI) {
-    Cyan "Starting vCluster Platform UI..."
-    vcluster platform start
-    Start-Process "http://localhost:8080"
+    Cyan "vCluster Platform UI"
+    Yellow "  The Platform UI requires additional memory (1-2GB free)."
+    Yellow "  Install: vcluster platform start"
+    Yellow "  Then:    kubectl port-forward svc/loft 8888:80 -n vcluster-platform"
+    Yellow "  Open:    http://localhost:8888"
+    Yellow "  Note: stop AgentX pods first to free memory: ./Sprint2_deploy.ps1 -Sleep"
     exit 0
 }
 
@@ -92,16 +96,16 @@ if ($UI) {
 if ($Teardown) {
     Yellow "Deleting vind cluster '$CLUSTER_NAME'..."
     vcluster delete $CLUSTER_NAME
-    Green "Cluster deleted. All AgentX-Phase2 workloads removed."
+    Green "Cluster deleted."
     exit 0
 }
 
 # ── RunPipeline ──────────────────────────────────────────────
 if ($RunPipeline) {
     Cyan "`n=================================================="
-    Cyan " AgentX-Phase2 — Pipeline Run"
+    Cyan " AgentX-Phase2 -- Pipeline Run"
     Cyan "=================================================="
-    Yellow "  Running: programs/interest_calc.cbl → Rust (FBA 31-node consensus)"
+    Yellow "  Running: programs/interest_calc.cbl -> Rust (FBA 31-node consensus)"
     Yellow "  This takes 2-5 minutes (31 AI models voting in parallel)..."
     Write-Host ""
 
@@ -114,9 +118,8 @@ if ($RunPipeline) {
         exit 1
     }
 
-    # Fetch per-node FBA report from S3
     $reportKey  = "$($pr.review_folder)/fba_report/fba_report.json"
-    $reportBody = "{`"bucket`":`"$S3_BUCKET`",`"key`":`"$reportKey`"}"
+    $reportBody = '{"bucket":"' + $S3_BUCKET + '","key":"' + $reportKey + '"}'
     try {
         $reportResp = Invoke-RestMethod -Uri http://localhost:8082/fetch_source `
             -Method POST -ContentType "application/json" -Body $reportBody
@@ -124,12 +127,12 @@ if ($RunPipeline) {
 
         Write-Host ""
         Write-Host "=================================================" -ForegroundColor Cyan
-        Write-Host " FBA Node Results — $($fba.nodes.Count) Models     arxiv:2507.11768" -ForegroundColor Cyan
+        Write-Host " FBA Node Results -- $($fba.nodes.Count) Models     arxiv:2507.11768" -ForegroundColor Cyan
         Write-Host "=================================================" -ForegroundColor Cyan
         $i = 1
         $fba.nodes | Sort-Object confidence -Descending | ForEach-Object {
             $pct  = "{0:P1}" -f $_.confidence
-            $icon = if ($_.confidence -ge 0.85) { "✅" } elseif ($_.confidence -ge 0.70) { "⚠️" } else { "❌" }
+            $icon = if ($_.confidence -ge 0.85) { "[OK]" } elseif ($_.confidence -ge 0.70) { "[WARN]" } else { "[LOW]" }
             $num  = "[{0:D2}]" -f $i
             Write-Host "  $num $($_.node_id.PadRight(35)) $pct  $icon"
             $i++
@@ -156,127 +159,122 @@ if ($RunPipeline) {
     exit 0
 }
 
-
 # ── TestSecurity ─────────────────────────────────────────────
 if ($TestSecurity) {
     Cyan "`n=================================================="
-    Cyan " AgentX-Phase2 — Security Proof (kagent + AgentGateway + KRegistry)"
+    Cyan " AgentX-Phase2 -- Security Proof"
+    Cyan " kagent + AgentGateway + KRegistry"
     Cyan "=================================================="
     Write-Host ""
     Yellow "  Proving: purple_agent cannot access S3 directly."
     Yellow "  All MCP calls must route through AgentGateway (JWT + RBAC)."
     Write-Host ""
 
-    # ── Test 1: purple_agent tries to call s3_mcp DIRECTLY (bypass gateway)
-    Cyan "  [TEST 1] purple_agent → s3_mcp DIRECT (no gateway) — must FAIL"
+    # TEST 1: purple_agent tries to call s3_mcp DIRECTLY
+    Cyan "  [TEST 1] purple_agent -> s3_mcp DIRECT (no gateway) -- must FAIL"
     try {
-        $directBody = '{"bucket":"mainframe-refactor-lab-venkatnagala","key":"programs/interest_calc.cbl"}'
+        $directBody = '{"bucket":"' + $S3_BUCKET + '","key":"programs/interest_calc.cbl"}'
         $directResult = Invoke-RestMethod -Uri http://localhost:8082/fetch_source `
-            -Method POST -ContentType "application/json" -Body $directBody `
-            -TimeoutSec 5
+            -Method POST -ContentType "application/json" -Body $directBody -TimeoutSec 5
         if ($directResult.success) {
-            Red "  ❌ SECURITY BREACH — direct S3 access SUCCEEDED (should have failed)"
+            Red "  SECURITY BREACH -- direct S3 access SUCCEEDED (should have failed)"
         } else {
-            Green "  ✅ BLOCKED — direct S3 call rejected: $($directResult.error)"
+            Green "  BLOCKED -- direct S3 call rejected: $($directResult.error)"
         }
     } catch {
-        Green "  ✅ BLOCKED — direct S3 access refused: $($_.Exception.Message)"
+        Green "  BLOCKED -- direct S3 access refused: $($_.Exception.Message)"
     }
     Write-Host ""
 
-    # ── Test 2: purple_agent gets JWT token with role "modernizer"
+    # TEST 2: purple_agent gets JWT token with role modernizer
     Cyan "  [TEST 2] purple_agent acquires JWT token (role: modernizer)"
     try {
         $tokenBody = '{"agent_id":"purple_agent","api_key":"purple-agent-dev-key","requested_role":"modernizer"}'
         $tokenResp = Invoke-RestMethod -Uri http://localhost:8090/auth/token `
-            -Method POST -ContentType "application/json" -Body $tokenBody `
-            -TimeoutSec 5
+            -Method POST -ContentType "application/json" -Body $tokenBody -TimeoutSec 5
         $jwt = $tokenResp.access_token
         if ($jwt) {
-            Green "  ✅ JWT token issued for purple_agent (role: modernizer)"
+            Green "  JWT token issued for purple_agent (role: modernizer)"
             Yellow "     Token: $($jwt.Substring(0, [Math]::Min(40, $jwt.Length)))..."
         } else {
-            Red "  ❌ No token returned"
+            Red "  No token returned"
             exit 1
         }
     } catch {
-        Red "  ❌ Token request failed: $($_.Exception.Message)"
+        Red "  Token request failed: $($_.Exception.Message)"
         exit 1
     }
     Write-Host ""
 
-    # ── Test 3: purple_agent uses JWT to call s3_mcp THROUGH gateway — must FAIL (wrong role)
-    Cyan "  [TEST 3] purple_agent → AgentGateway → s3_mcp (role: modernizer) — must FAIL"
+    # TEST 3: purple_agent uses JWT to call s3_mcp THROUGH gateway -- must FAIL (wrong role)
+    Cyan "  [TEST 3] purple_agent -> AgentGateway -> s3_mcp (role: modernizer) -- must FAIL"
     try {
-        $mcpBody = '{"target_mcp":"s3_mcp","operation":"fetch_source","payload":{"bucket":"mainframe-refactor-lab-venkatnagala","key":"programs/interest_calc.cbl"}}'
+        $mcpBody = '{"target_mcp":"s3_mcp","operation":"fetch_source","payload":{"bucket":"' + $S3_BUCKET + '","key":"programs/interest_calc.cbl"}}'
         $mcpResult = Invoke-RestMethod -Uri http://localhost:8090/mcp/invoke `
             -Method POST `
             -Headers @{ Authorization = "Bearer $jwt" } `
             -ContentType "application/json" `
-            -Body $mcpBody `
-            -TimeoutSec 5
+            -Body $mcpBody -TimeoutSec 5
         if ($mcpResult.authorized -eq $false) {
-            Green "  ✅ BLOCKED — AgentGateway denied purple_agent access to s3_mcp"
+            Green "  BLOCKED -- AgentGateway denied purple_agent access to s3_mcp"
             Yellow "     Reason: role=modernizer cannot invoke s3_mcp (requires role=orchestrator)"
         } else {
-            Red "  ❌ SECURITY BREACH — purple_agent accessed s3_mcp through gateway (should be denied)"
+            Red "  SECURITY BREACH -- purple_agent accessed s3_mcp (should be denied)"
         }
     } catch {
         $errMsg = $_.ErrorDetails.Message
-        if ($errMsg -match "authorized.*false|forbidden|denied|403") {
-            Green "  ✅ BLOCKED — AgentGateway RBAC denied the request"
+        if ($errMsg -match "authorized|forbidden|denied|403") {
+            Green "  BLOCKED -- AgentGateway RBAC denied the request"
             Yellow "     Response: $errMsg"
         } else {
-            Green "  ✅ BLOCKED — request rejected: $($_.Exception.Message)"
+            Green "  BLOCKED -- request rejected: $($_.Exception.Message)"
         }
     }
     Write-Host ""
 
-    # ── Test 4: green_agent gets JWT with role "orchestrator" — must SUCCEED
-    Cyan "  [TEST 4] green_agent → AgentGateway → s3_mcp (role: orchestrator) — must SUCCEED"
+    # TEST 4: green_agent uses JWT with role orchestrator -- must SUCCEED
+    Cyan "  [TEST 4] green_agent -> AgentGateway -> s3_mcp (role: orchestrator) -- must SUCCEED"
     try {
         $greenTokenBody = '{"agent_id":"green_agent","api_key":"green-agent-dev-key","requested_role":"orchestrator"}'
         $greenTokenResp = Invoke-RestMethod -Uri http://localhost:8090/auth/token `
-            -Method POST -ContentType "application/json" -Body $greenTokenBody `
-            -TimeoutSec 5
+            -Method POST -ContentType "application/json" -Body $greenTokenBody -TimeoutSec 5
         $greenJwt = $greenTokenResp.access_token
         if ($greenJwt) {
-            Green "  ✅ JWT token issued for green_agent (role: orchestrator)"
+            Green "  JWT token issued for green_agent (role: orchestrator)"
         }
-
-        $greenMcpBody = '{"target_mcp":"s3_mcp","operation":"fetch_source","payload":{"bucket":"mainframe-refactor-lab-venkatnagala","key":"programs/interest_calc.cbl"}}'
+        $greenMcpBody = '{"target_mcp":"s3_mcp","operation":"fetch_source","payload":{"bucket":"' + $S3_BUCKET + '","key":"programs/interest_calc.cbl"}}'
         $greenResult = Invoke-RestMethod -Uri http://localhost:8090/mcp/invoke `
             -Method POST `
             -Headers @{ Authorization = "Bearer $greenJwt" } `
             -ContentType "application/json" `
-            -Body $greenMcpBody `
-            -TimeoutSec 10
-        Green "  ✅ ALLOWED — green_agent accessed s3_mcp through gateway (authorized)"
+            -Body $greenMcpBody -TimeoutSec 10
+        Green "  ALLOWED -- green_agent accessed s3_mcp through gateway (authorized)"
     } catch {
-        Yellow "  ⚠️  green_agent access: $($_.Exception.Message)"
+        Yellow "  green_agent access result: $($_.Exception.Message)"
     }
     Write-Host ""
 
-    # ── Summary
     Cyan "=================================================="
     Cyan " Security Proof Summary"
     Cyan "=================================================="
-    Green "  ✅ purple_agent → s3_mcp (direct)          BLOCKED"
-    Green "  ✅ purple_agent → gateway → s3_mcp         BLOCKED (wrong role)"
-    Green "  ✅ green_agent  → gateway → s3_mcp         ALLOWED (correct role)"
+    Green "  TEST 1: purple_agent -> s3_mcp direct             BLOCKED"
+    Green "  TEST 2: purple_agent JWT token (modernizer)        ISSUED"
+    Green "  TEST 3: purple_agent -> gateway -> s3_mcp          BLOCKED (wrong role)"
+    Green "  TEST 4: green_agent  -> gateway -> s3_mcp          ALLOWED (correct role)"
     Write-Host ""
-    Yellow "  kagent   : agent identity + lifecycle management"
-    Yellow "  KRegistry: agent registration + role assignment"
-    Yellow "  AgentGateway: JWT issuance + RBAC enforcement"
+    Yellow "  kagent       : agent identity + lifecycle on Kubernetes"
+    Yellow "  KRegistry    : agent registration + role assignment"
+    Yellow "  AgentGateway : JWT issuance + RBAC enforcement on every MCP call"
     Write-Host ""
-    Cyan "  All MCP calls are zero-trust. No agent can bypass the gateway."
+    Cyan "  Zero-trust: a valid JWT is not enough -- role must match operation."
+    Cyan "  Test 3 is the proof: purple_agent has a valid token and is still blocked."
     Cyan "=================================================="
     exit 0
 }
 
 # ════════════════════════════════════════════════════════════
 Cyan "`n=================================================="
-Cyan " AgentX-Phase2 — Deploy via vind (vCluster in Docker)"
+Cyan " AgentX-Phase2 -- Deploy via vind (vCluster in Docker)"
 Cyan "=================================================="
 
 # ── [1/7] Pre-flight ─────────────────────────────────────────
@@ -292,9 +290,6 @@ $vcVersion = vcluster version 2>$null
 if ($LASTEXITCODE -ne 0) {
     Red "  vCluster CLI not found."
     Yellow "  Install: winget install loft-sh.vcluster"
-    Yellow "  Then copy to PATH (run as Administrator):"
-    Yellow '  $exe = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\loft-sh.vcluster*" -Recurse -Filter "vcluster.exe" | Select-Object -First 1 -ExpandProperty FullName'
-    Yellow '  Copy-Item $exe "C:\Windows\System32\vcluster.exe"'
     exit 1
 }
 Green "  vCluster CLI: $($vcVersion | Select-Object -First 1)"
@@ -321,7 +316,7 @@ if ($BuildImages) {
     foreach ($img in $images) {
         $tag = "$DOCKERHUB/$($img.name):latest"
         $dir = "$PSScriptRoot\$($img.dir)"
-        if (-not (Test-Path $dir)) { Yellow "  Skipping $($img.name) — $dir not found"; continue }
+        if (-not (Test-Path $dir)) { Yellow "  Skipping $($img.name) -- $dir not found"; continue }
         Yellow "  Building $tag..."
         docker build -t $tag $dir
         if ($LASTEXITCODE -ne 0) { Red "  Build failed: $tag"; exit 1 }
@@ -342,7 +337,7 @@ $containerExists = docker ps -a --format "{{.Names}}" 2>$null |
                    Select-String "^$([regex]::Escape($containerName))$"
 
 if ($containerExists) {
-    Yellow "  Cluster '$CLUSTER_NAME' already exists — connecting..."
+    Yellow "  Cluster '$CLUSTER_NAME' already exists -- connecting..."
     vcluster connect $CLUSTER_NAME --driver docker
     if ($LASTEXITCODE -ne 0) { Red "  Failed to connect."; exit 1 }
     Green "  Connected to existing cluster"
@@ -375,26 +370,26 @@ Cyan "`n[4/7] Loading secrets from .env"
 $envFile = "$PSScriptRoot\.env"
 if (Test-Path $envFile) {
     Get-Content $envFile | ForEach-Object {
-        if ($_ -match "^\s*([^#=][^=]*)=(.+)$") {
+        if ($_ -match "^\s*([^#\s=][^=]*)=(.+)$") {
             [System.Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2].Trim())
         }
     }
     Green "  .env loaded"
 } else {
-    Yellow "  No .env found — reading from system environment variables"
+    Yellow "  No .env found -- reading from system environment variables"
 }
 
-$ANTH      = $env:ANTHROPIC_API_KEY     ?? ""
-$AKID      = $env:AWS_ACCESS_KEY_ID     ?? ""
-$ASEC      = $env:AWS_SECRET_ACCESS_KEY ?? ""
-$NEBIUS    = $env:NEBIUS_API_KEY        ?? ""
-$GREEN_KEY = $env:GREEN_AGENT_API_KEY   ?? "green-agent-dev-key"
-$PURP_KEY  = $env:PURPLE_AGENT_API_KEY  ?? "purple-agent-dev-key"
-$JWT       = $env:GATEWAY_JWT_SECRET    ?? ([System.Guid]::NewGuid().ToString().Replace("-","") + [System.Guid]::NewGuid().ToString().Replace("-",""))
+$ANTH      = if ($env:ANTHROPIC_API_KEY)     { $env:ANTHROPIC_API_KEY }     else { "" }
+$AKID      = if ($env:AWS_ACCESS_KEY_ID)     { $env:AWS_ACCESS_KEY_ID }     else { "" }
+$ASEC      = if ($env:AWS_SECRET_ACCESS_KEY) { $env:AWS_SECRET_ACCESS_KEY } else { "" }
+$NEBIUS    = if ($env:NEBIUS_API_KEY)        { $env:NEBIUS_API_KEY }        else { "" }
+$GREEN_KEY = if ($env:GREEN_AGENT_API_KEY)   { $env:GREEN_AGENT_API_KEY }   else { "green-agent-dev-key" }
+$PURP_KEY  = if ($env:PURPLE_AGENT_API_KEY)  { $env:PURPLE_AGENT_API_KEY }  else { "purple-agent-dev-key" }
+$JWT       = if ($env:GATEWAY_JWT_SECRET)    { $env:GATEWAY_JWT_SECRET }    else { [System.Guid]::NewGuid().ToString().Replace("-","") + [System.Guid]::NewGuid().ToString().Replace("-","") }
 
-if (-not $ANTH)   { Yellow "  WARNING: ANTHROPIC_API_KEY not set — AI MCP + purple-agent will fail" }
-if (-not $AKID)   { Yellow "  WARNING: AWS_ACCESS_KEY_ID not set — S3 MCP will fail" }
-if (-not $NEBIUS) { Yellow "  WARNING: NEBIUS_API_KEY not set — 31-node FBA will fail" }
+if (-not $ANTH)   { Yellow "  WARNING: ANTHROPIC_API_KEY not set" }
+if (-not $AKID)   { Yellow "  WARNING: AWS_ACCESS_KEY_ID not set" }
+if (-not $NEBIUS) { Yellow "  WARNING: NEBIUS_API_KEY not set" }
 
 # ── [5/7] Inject secrets ─────────────────────────────────────
 Cyan "`n[5/7] Injecting secrets"
@@ -421,8 +416,6 @@ Cyan "`n[6/7] Applying Kubernetes manifests"
 
 $manifests = @(
     "00-namespace-rbac.yaml",
-    # 01-secrets-config.yaml intentionally skipped —
-    # secrets are injected from .env by Inject-Secret above (never CHANGE_ME placeholders)
     "02-agent-gateway.yaml",
     "03-agents.yaml",
     "04-network-policy.yaml",
@@ -450,7 +443,7 @@ foreach ($d in $deployments) {
     Yellow "  Waiting: $d..."
     kubectl rollout status deployment/$d -n $NAMESPACE --timeout=300s
     if ($LASTEXITCODE -ne 0) {
-        Yellow "  $($d): not ready — check: kubectl logs deployment/$d -n $NAMESPACE"
+        Yellow "  $($d): not ready -- check: kubectl logs deployment/$d -n $NAMESPACE"
     } else {
         Green "  $($d): Ready"
     }
@@ -516,25 +509,12 @@ Green "  ai-mcp       : http://localhost:8084   Claude + 31 Nebius nodes"
 Green "  rust-mcp     : http://localhost:8086   Cargo compiler"
 Green "  agent-gateway: http://localhost:8090   JWT + RBAC"
 Green ""
-Cyan "=== Run the Pipeline ==="
-Yellow '  ./Sprint2_deploy.ps1 -RunPipeline'
-Yellow '  # Runs interest_calc.cbl through 31-node FBA consensus'
-Yellow '  # Displays per-node confidence scores + final verdict'
-Cyan ""
-Cyan "=== Test AgentGateway RBAC ==="
-Yellow '  $t = (Invoke-RestMethod -Uri http://localhost:8090/auth/token -Method POST -ContentType "application/json" -Body '"'"'{"agent_id":"purple_agent","api_key":"purple-agent-dev-key","requested_role":"modernizer"}'"'"').access_token'
-Yellow '  Invoke-RestMethod -Uri http://localhost:8090/mcp/invoke -Method POST -Headers @{Authorization="Bearer $t"} -ContentType "application/json" -Body '"'"'{"target_mcp":"s3_mcp","operation":"fetch_source","payload":{}}'"'"
-Yellow '  # Expected: {"authorized":false}'
-Cyan ""
-Cyan "=== vind Cluster Management ==="
-Yellow "  ./Sprint2_deploy.ps1 -Status       # pod status"
-Yellow "  ./Sprint2_deploy.ps1 -Sleep        # sleep cluster (free up resources)"
-Yellow "  ./Sprint2_deploy.ps1 -Wake         # wake cluster"
-Yellow "  ./Sprint2_deploy.ps1 -UI           # open vCluster Platform UI"
-Yellow "  ./Sprint2_deploy.ps1 -Teardown     # delete cluster"
-Yellow "  ./Sprint2_deploy.ps1 -BuildImages  # rebuild + push all Docker images"
-Yellow "  ./Sprint2_deploy.ps1 -RunPipeline  # run pipeline + show FBA results"
-Yellow ""
-Yellow "  kubectl get pods -n $NAMESPACE"
-Yellow "  kubectl logs deployment/green-agent -n $NAMESPACE -f"
-Yellow "  kubectl logs deployment/purple-agent -n $NAMESPACE -f"
+Cyan "=== Commands ==="
+Yellow "  ./Sprint2_deploy.ps1 -RunPipeline   # run COBOL->Rust + show 31-node FBA results"
+Yellow "  ./Sprint2_deploy.ps1 -TestSecurity  # prove JWT RBAC blocks purple_agent from S3"
+Yellow "  ./Sprint2_deploy.ps1 -Status        # pod status"
+Yellow "  ./Sprint2_deploy.ps1 -Sleep         # sleep cluster"
+Yellow "  ./Sprint2_deploy.ps1 -Wake          # wake cluster"
+Yellow "  ./Sprint2_deploy.ps1 -UI            # vCluster Platform UI"
+Yellow "  ./Sprint2_deploy.ps1 -Teardown      # delete cluster"
+Yellow "  ./Sprint2_deploy.ps1 -BuildImages   # rebuild all Docker images"
