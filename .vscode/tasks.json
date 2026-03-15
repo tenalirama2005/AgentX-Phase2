@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Connect vind cluster",
+      "type": "shell",
+      "command": "docker start vcluster.cp.agentx-phase2; Start-Sleep 10; vcluster connect agentx-phase2 --driver docker",
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    }
+  ]
+}
