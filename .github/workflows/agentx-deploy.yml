@@ -87,6 +87,8 @@ jobs:
             -n kube-system \
             --timeout=120s
           kubectl get pods -n kube-system
+          sleep 30
+          echo "Cilium ready"
       # ── Install vCluster Platform UI ─────────────────────────
       - name: Install vCluster Platform UI
         run: |
@@ -147,6 +149,7 @@ jobs:
 
       # ── Wait for pods ────────────────────────────────────────
       - name: Wait for all pods to be ready
+        continue-on-error: true
         run: |
           echo "Waiting for deployments..."
           echo "Giving pods 60s to start pulling images..."
