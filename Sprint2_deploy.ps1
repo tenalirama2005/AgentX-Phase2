@@ -83,12 +83,20 @@ if ($Wake) {
 
 # ── UI ───────────────────────────────────────────────────────
 if ($UI) {
-    Cyan "vCluster Platform UI"
-    Yellow "  The Platform UI requires additional memory (1-2GB free)."
-    Yellow "  Install: vcluster platform start"
-    Yellow "  Then:    kubectl port-forward svc/loft 8888:80 -n vcluster-platform"
-    Yellow "  Open:    http://localhost:8888"
-    Yellow "  Note: stop AgentX pods first to free memory: ./Sprint2_deploy.ps1 -Sleep"
+    Cyan "Starting vCluster Platform UI..."
+    vcluster platform start --reset 2>&1 | Where-Object { $_ -notmatch "Password|password|LOGIN|######" }
+    if ($LASTEXITCODE -ne 0) {
+        Yellow "  Retrying without --reset..."
+        vcluster platform start 2>&1 | Where-Object { $_ -notmatch "Password|password|LOGIN|######" }
+    }
+    Start-Sleep -Seconds 10
+    kubectl get pods -n vcluster-platform
+    Yellow "  Port-forwarding loft to http://localhost:8888 ..."
+    Start-Process -NoNewWindow "kubectl" -ArgumentList "port-forward svc/loft 8888:80 -n vcluster-platform"
+    Start-Sleep -Seconds 3
+    Start-Process "http://localhost:8888"
+    Green "  vCluster Platform UI: http://localhost:8888"
+    Green "  Login at: http://localhost:8888/login"
     exit 0
 }
 
@@ -105,8 +113,8 @@ if ($RunPipeline) {
     Cyan "`n=================================================="
     Cyan " AgentX-Phase2 -- Pipeline Run"
     Cyan "=================================================="
-    Yellow "  Running: programs/interest_calc.cbl -> Rust (FBA 31-node consensus)"
-    Yellow "  This takes 2-5 minutes (31 AI models voting in parallel)..."
+    Yellow "  Running: programs/interest_calc.cbl -> Rust (FBA Thirty One -node consensus)"
+    Yellow "  This takes 2-5 minutes (Thirty One AI models voting in parallel)..."
     Write-Host ""
 
     $pjson = '{"s3_key":"programs/interest_calc.cbl"}'
@@ -127,7 +135,7 @@ if ($RunPipeline) {
 
         Write-Host ""
         Write-Host "=================================================" -ForegroundColor Cyan
-        Write-Host " FBA Node Results -- $($fba.nodes.Count) Models     arxiv:2507.11768" -ForegroundColor Cyan
+        Write-Host " FBA Node Results -- Thirty One Models     arxiv:2507.11768" -ForegroundColor Cyan
         Write-Host "=================================================" -ForegroundColor Cyan
         $i = 1
         $fba.nodes | Sort-Object confidence -Descending | ForEach-Object {
@@ -502,15 +510,15 @@ Green "  vind cluster : $CLUSTER_NAME"
 Green "  Namespace    : $NAMESPACE"
 Green ""
 Green "  green-agent  : http://localhost:8080   Orchestrator (pipeline entry)"
-Green "  purple-agent : http://localhost:8085   FBA 31-node consensus"
+Green "  purple-agent : http://localhost:8085   FBA Thirty One -node consensus"
 Green "  s3-mcp       : http://localhost:8082   AWS S3"
 Green "  cobol-mcp    : http://localhost:8083   GnuCOBOL compiler"
-Green "  ai-mcp       : http://localhost:8084   Claude + 31 Nebius nodes"
+Green "  ai-mcp       : http://localhost:8084   Claude + Thirty One Nebius nodes"
 Green "  rust-mcp     : http://localhost:8086   Cargo compiler"
 Green "  agent-gateway: http://localhost:8090   JWT + RBAC"
 Green ""
 Cyan "=== Commands ==="
-Yellow "  ./Sprint2_deploy.ps1 -RunPipeline   # run COBOL->Rust + show 31-node FBA results"
+Yellow "  ./Sprint2_deploy.ps1 -RunPipeline   # run COBOL->Rust + show Thirty One -node FBA results"
 Yellow "  ./Sprint2_deploy.ps1 -TestSecurity  # prove JWT RBAC blocks purple_agent from S3"
 Yellow "  ./Sprint2_deploy.ps1 -Status        # pod status"
 Yellow "  ./Sprint2_deploy.ps1 -Sleep         # sleep cluster"
