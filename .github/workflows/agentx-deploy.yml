@@ -56,20 +56,11 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # ── Create vind cluster ──────────────────────────────────
-      - name: Create vind cluster
+      - name: Create kind cluster
         run: |
-          cat > /tmp/vind-config.yaml << 'EOF'
-          experimental:
-            docker:
-              registryProxy:
-                enabled: true
-              loadBalancer:
-                enabled: true
-                forwardPorts: true
-          EOF
-          vcluster create $CLUSTER_NAME \
-            --driver docker \
-            --values /tmp/vind-config.yaml
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
+          chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
+          kind create cluster --name $CLUSTER_NAME --wait 60s
           kubectl get nodes
 
 
