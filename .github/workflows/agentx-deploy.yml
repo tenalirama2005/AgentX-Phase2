@@ -66,17 +66,6 @@ jobs:
           kubectl get nodes
 
       # ── Install Calico for NetworkPolicy enforcement ───────────
-      - name: Install Calico CNI
-        run: |
-          kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/calico.yaml
-          echo "Waiting for Calico to be ready..."
-          kubectl wait --for=condition=ready pod \
-            -l k8s-app=calico-node \
-            -n kube-system \
-            --timeout=120s
-          kubectl get pods -n kube-system
-          echo "Calico ready"
-      # ── Install vCluster Platform UI ─────────────────────────
       - name: Install vCluster Platform UI
         run: |
           echo "Installing vCluster Platform UI..."
