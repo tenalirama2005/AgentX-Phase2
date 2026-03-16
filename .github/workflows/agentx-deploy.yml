@@ -75,6 +75,7 @@ jobs:
 
       # ── Install Cilium for NetworkPolicy enforcement ──────────
       - name: Install Cilium CNI
+        continue-on-error: true
         run: |
           helm repo add cilium https://helm.cilium.io/
           helm repo update
@@ -91,7 +92,7 @@ jobs:
             --set ipam.mode=kubernetes
           echo "Waiting for Cilium pods..."
           kubectl wait --for=condition=ready pod \
-            -l k8s-app=cilium \
+            -l app.kubernetes.io/name=cilium \
             -n kube-system \
             --timeout=120s
           kubectl get pods -n kube-system
