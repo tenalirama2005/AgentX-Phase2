@@ -73,31 +73,17 @@ EOF
           kubectl get nodes
 
 
-      # ── Install Cilium for NetworkPolicy enforcement ──────────
-      - name: Install Cilium CNI
-        continue-on-error: true
+      # ── Install Calico for NetworkPolicy enforcement ───────────
+      - name: Install Calico CNI
         run: |
-          helm repo add cilium https://helm.cilium.io/
-          helm repo update
-          helm install cilium cilium/cilium \
-            --version 1.17.0 \
-            --namespace kube-system \
-            --set kubeProxyReplacement=false \
-            --set hostServices.enabled=false \
-            --set externalIPs.enabled=true \
-            --set nodePort.enabled=true \
-            --set hostPort.enabled=true \
-            --set bpf.masquerade=false \
-            --set image.pullPolicy=IfNotPresent \
-            --set ipam.mode=kubernetes
-          echo "Waiting for Cilium pods..."
+          kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/calico.yaml
+          echo "Waiting for Calico to be ready..."
           kubectl wait --for=condition=ready pod \
-            -l app.kubernetes.io/name=cilium \
+            -l k8s-app=calico-node \
             -n kube-system \
             --timeout=120s
           kubectl get pods -n kube-system
-          sleep 30
-          echo "Cilium ready"
+          echo "Calico ready"
       # ── Install vCluster Platform UI ─────────────────────────
       - name: Install vCluster Platform UI
         run: |
