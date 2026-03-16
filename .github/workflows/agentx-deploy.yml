@@ -58,9 +58,9 @@ jobs:
         continue-on-error: true
         timeout-minutes: 60
         run: |
-          curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.23.0 sh -
-          export PATH=$PWD/istio-1.23.0/bin:$PATH
-          echo "$PWD/istio-1.23.0/bin" >> $GITHUB_PATH
+          curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.29.0 sh -
+          export PATH=$PWD/istio-1.29.0/bin:$PATH
+          echo "$PWD/istio-1.29.0/bin" >> $GITHUB_PATH
           istioctl install --set profile=minimal -y
           --set values.global.proxy.readinessInitialDelaySeconds=30 \
           --readiness-timeout 60m0s
@@ -68,8 +68,8 @@ jobs:
             -l app=istiod \
             -n istio-system \
             --timeout=3600s
-          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.23/samples/addons/prometheus.yaml
-          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.23/samples/addons/kiali.yaml
+          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29/samples/addons/prometheus.yaml
+          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29/samples/addons/kiali.yaml
           kubectl label namespace mainframe-modernization istio-injection=enabled --overwrite || true
           kubectl apply -f - << 'AUTHEOF'
 
