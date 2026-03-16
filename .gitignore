@@ -32,3 +32,5 @@ fba_report_latest.json
 
 # vind temp files
 agentx-vind.yaml
+vcluster
+vcluster-*
