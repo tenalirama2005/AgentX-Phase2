@@ -60,7 +60,7 @@ jobs:
           curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.23.0 sh -
           export PATH=$PWD/istio-1.23.0/bin:$PATH
           echo "$PWD/istio-1.23.0/bin" >> $GITHUB_PATH
-          istioctl install --set profile=demo -y
+          istioctl install --set profile=minimal -y
           kubectl wait --for=condition=ready pod \
             -l app=istiod \
             -n istio-system \
