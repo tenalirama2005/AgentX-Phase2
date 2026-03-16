@@ -1,0 +1,15 @@
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-direct-s3-access
+  namespace: mainframe-modernization
+spec:
+  selector:
+    matchLabels:
+      app: s3-mcp
+  action: DENY
+  rules:
+  - from:
+    - source:
+        principals:
+        - "cluster.local/ns/mainframe-modernization/sa/purple-agent-sa"
