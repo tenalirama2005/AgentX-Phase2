@@ -64,8 +64,7 @@ jobs:
 
             # Install Istio with proper flags (all on one logical command)
             istioctl install \
-            --set profile=minimal \
-            --set values.global.timeout=10m \
+            --set profile=minimal \            
             --set values.pilot.resources.requests.cpu=10m \
             --set values.pilot.resources.requests.memory=40Mi \
             --skip-confirmation
@@ -75,7 +74,7 @@ jobs:
             kubectl wait --for=condition=Ready pod \
                -l app=istiod \
                -n istio-system \
-              --timeout=300s
+              --timeout=600s
 
             # Install addons
             kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29.1/samples/addons/prometheus.yaml
