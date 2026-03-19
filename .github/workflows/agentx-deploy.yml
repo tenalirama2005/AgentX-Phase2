@@ -55,27 +55,43 @@ jobs:
           kubectl get nodes
 
       - name: Install Istio and Kiali
-        continue-on-error: true
-        timeout-minutes: 60
-        run: |
-          curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.29.1 sh -
-          export PATH=$PWD/istio-1.29.1/bin:$PATH
-          echo "$PWD/istio-1.29.1/bin" >> $GITHUB_PATH
-          istioctl install --set profile=minimal --skip-confirmation
-          --set values.global.proxy.readinessInitialDelaySeconds=30 \
-          --readiness-timeout 60m0s
-          kubectl wait --for=condition=ready pod \
-            -l app=istiod \
-            -n istio-system \
-            --timeout=60m0s
-          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29.1/samples/addons/prometheus.yaml
-          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29.1/samples/addons/kiali.yaml
-          kubectl label namespace mainframe-modernization istio-injection=enabled --overwrite || true
-          kubectl apply -f - << 'AUTHEOF'
+  continue-on-error: true
+  timeout-minutes: 60
+  run: |
+    curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.29.1 sh -
+    export PATH=$PWD/istio-1.29.1/bin:$PATH
+    echo "$PWD/istio-1.29.1/bin" >> $GITHUB_PATH
 
-          kubectl apply -f k8s/base/06-istio-authpolicy.yaml
-          echo "Istio + Kiali ready"
-          kubectl get pods -n istio-system
+    # Install Istio with proper flags (all on one logical command)
+    istioctl install \
+      --set profile=minimal \
+      --set values.global.timeout=10m \
+      --set pilot.resources.requests.cpu=10m \
+      --set pilot.resources.requests.memory=40Mi \
+      --skip-confirmation
+
+    # Wait for istiod with explicit kubectl wait
+    echo "Waiting for istiod to be ready..."
+    kubectl wait --for=condition=Ready pod \
+      -l app=istiod \
+      -n istio-system \
+      --timeout=300s
+
+    # Install addons
+    kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29.1/samples/addons/prometheus.yaml
+    kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29.1/samples/addons/kiali.yaml
+
+    # Label namespace for sidecar injection
+    kubectl label namespace mainframe-modernization istio-injection=enabled --overwrite || true
+
+    # Apply your auth policy (fixed: removed broken heredoc)
+    kubectl apply -f k8s/base/06-istio-authpolicy.yaml
+
+    # Verify installation
+    echo "=== Istio System Pods ==="
+    kubectl get pods -n istio-system
+    echo "=== Istiod Logs (last 50 lines) ==="
+    kubectl logs -n istio-system -l app=istiod --tail=50 || true
 
       - name: Create namespace
         run: |
