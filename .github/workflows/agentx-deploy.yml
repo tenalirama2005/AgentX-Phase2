@@ -66,8 +66,8 @@ jobs:
             istioctl install \
             --set profile=minimal \
             --set values.global.timeout=10m \
-            --set pilot.resources.requests.cpu=10m \
-            --set pilot.resources.requests.memory=40Mi \
+            --set values.pilot.resources.requests.cpu=10m \
+            --set values.pilot.resources.requests.memory=40Mi \
             --skip-confirmation
 
             # Wait for istiod with explicit kubectl wait
