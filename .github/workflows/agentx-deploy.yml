@@ -61,7 +61,7 @@ jobs:
           curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.29.1 sh -
           export PATH=$PWD/istio-1.29.1/bin:$PATH
           echo "$PWD/istio-1.29.1/bin" >> $GITHUB_PATH
-          istioctl install --set profile=demo --skip-confirmation
+          istioctl install --set profile=minimal --skip-confirmation
           --set values.global.proxy.readinessInitialDelaySeconds=30 \
           --readiness-timeout 60m0s
           kubectl wait --for=condition=ready pod \
