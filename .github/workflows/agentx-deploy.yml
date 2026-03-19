@@ -29,12 +29,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install kubectl
-        uses: azure/setup-kubectl@v3
+        uses: azure/setup-kubectl@v4
         with:
           version: 'latest'
 
       - name: Install Helm
-        uses: azure/setup-helm@v3
+        uses: azure/setup-helm@v4
         with:
           version: 'latest'
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -61,7 +61,7 @@ jobs:
           curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.29.1 sh -
           export PATH=$PWD/istio-1.29.1/bin:$PATH
           echo "$PWD/istio-1.29.1/bin" >> $GITHUB_PATH
-          istioctl install --set profile=minimal
+          istioctl install --set profile=minimal -Y
           --set values.global.proxy.readinessInitialDelaySeconds=30 \
           --readiness-timeout 60m0s
           kubectl wait --for=condition=ready pod \
