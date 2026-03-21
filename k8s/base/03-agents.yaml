@@ -75,23 +75,27 @@ spec:
                   key: aws-region
           resources:
             requests:
-              cpu: "250m"
-              memory: "512Mi"
+              cpu: "50m"
+              memory: "128Mi"
             limits:
-              cpu: "1000m"
-              memory: "1Gi"
+              cpu: "500m"
+              memory: "512Mi"
           livenessProbe:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 30
+            initialDelaySeconds: 120
             periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
           readinessProbe:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 5
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -191,17 +195,19 @@ spec:
                   key: claude-model
           resources:
             requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
               cpu: "500m"
               memory: "512Mi"
-            limits:
-              cpu: "2000m"
-              memory: "2Gi"
           livenessProbe:
             httpGet:
               path: /health
               port: 8081
-            initialDelaySeconds: 30
+            initialDelaySeconds: 120
             periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

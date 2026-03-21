@@ -487,10 +487,14 @@ async fn call_mcp_server(
         .build()
         .map_err(|e| e.to_string())?;
 
+    let gateway_token = std::env::var("GATEWAY_INTERNAL_TOKEN")
+        .unwrap_or_else(|_| "agentx-internal-token".to_string());
+
     let response = client
         .post(format!("{}/{}", url, operation))
         .header("X-Request-ID", request_id)
         .header("X-Gateway", "agent_gateway/1.0")
+        .header("X-AgentGateway-Token", gateway_token)
         .json(payload)
         .send()
         .await

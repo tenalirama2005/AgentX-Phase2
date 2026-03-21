@@ -34,3 +34,19 @@ fba_report_latest.json
 agentx-vind.yaml
 vcluster
 vcluster-*
+
+# Istio
+istio-*/
+
+# Rust build artifacts
+target/
+Cargo.lock
+
+# RTK (I see .rtk folder)
+.rtk/
+
+# VS Code
+.vscode/
+
+# Kind kubeconfig
+kubeconfig*

@@ -7,25 +7,25 @@
 //   POST /clippy       - Run Clippy lints
 //   GET  /health       - Health check
 
-use actix_web::{web, App, HttpServer, HttpResponse, middleware};
+use actix_web::{middleware, web, App, HttpResponse, HttpServer};
+use log::{error, info};
 use serde::{Deserialize, Serialize};
-use std::process::Command;
 use std::fs;
+use std::process::Command;
 use uuid::Uuid;
-use log::{info, error};
 
 // ─── Request/Response Types ───────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct CompileRequest {
-    pub source: String,           // Rust source code
+    pub source: String,             // Rust source code
     pub input_data: Option<String>, // Optional stdin input
 }
 
 #[derive(Serialize)]
 pub struct CompileResponse {
     pub success: bool,
-    pub output: Option<String>,   // Execution stdout
+    pub output: Option<String>, // Execution stdout
     pub compile_log: Option<String>,
     pub error: Option<String>,
 }
@@ -45,9 +45,7 @@ pub struct CheckResponse {
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
 /// Compile Rust source and execute it, returning stdout output
-async fn compile(
-    body: web::Json<CompileRequest>,
-) -> HttpResponse {
+async fn compile(body: web::Json<CompileRequest>) -> HttpResponse {
     let job_id = Uuid::new_v4().to_string();
     let work_dir = format!("/tmp/rust_{}", job_id);
     let src_dir = format!("{}/src", work_dir);
@@ -59,7 +57,7 @@ async fn compile(
         return error_response(&format!("Failed to create work dir: {}", e));
     }
 
-// Detect dependencies from source code
+    // Detect dependencies from source code
     let mut deps = String::from("");
     if body.source.contains("rust_decimal") {
         deps.push_str("rust_decimal = \"1.34\"\n");
@@ -78,8 +76,8 @@ async fn compile(
         deps.push_str("regex = \"1\"\n");
     }
 
-let cargo_toml = format!(
-    r#"[package]
+    let cargo_toml = format!(
+        r#"[package]
 name = "modernized"
 version = "0.1.0"
 edition = "2021"
@@ -87,8 +85,8 @@ edition = "2021"
 [dependencies]
 {}
 "#,
-    deps
-);
+        deps
+    );
     if let Err(e) = fs::write(format!("{}/Cargo.toml", work_dir), &cargo_toml) {
         cleanup(&work_dir);
         return error_response(&format!("Failed to write Cargo.toml: {}", e));
@@ -104,7 +102,7 @@ edition = "2021"
     let build_output = Command::new("cargo")
         .args(["build", "--release"])
         .current_dir(&work_dir)
-        .env("CARGO_HOME", "/home/mcpuser/.cargo")  // Shared cargo cache
+        .env("CARGO_HOME", "/home/mcpuser/.cargo") // Shared cargo cache
         .output();
 
     match build_output {
@@ -131,8 +129,8 @@ edition = "2021"
             // Execute the compiled binary
             let binary_path = format!("{}/target/release/modernized", work_dir);
             let exec_result = if let Some(input) = &body.input_data {
-                use std::process::Stdio;
                 use std::io::Write;
+                use std::process::Stdio;
 
                 let child = Command::new(&binary_path)
                     .stdin(Stdio::piped())
@@ -187,15 +185,14 @@ edition = "2021"
 }
 
 /// Check Rust code without executing (cargo check)
-async fn cargo_check(
-    body: web::Json<CheckRequest>,
-) -> HttpResponse {
+async fn cargo_check(body: web::Json<CheckRequest>) -> HttpResponse {
     let job_id = Uuid::new_v4().to_string();
     let work_dir = format!("/tmp/rust_check_{}", job_id);
     let src_dir = format!("{}/src", work_dir);
     let _ = fs::create_dir_all(&src_dir);
 
-    let cargo_toml = "[package]\nname=\"check\"\nversion=\"0.1.0\"\nedition=\"2021\"\n[dependencies]\n";
+    let cargo_toml =
+        "[package]\nname=\"check\"\nversion=\"0.1.0\"\nedition=\"2021\"\n[dependencies]\n";
     let _ = fs::write(format!("{}/Cargo.toml", work_dir), cargo_toml);
     let _ = fs::write(format!("{}/src/main.rs", work_dir), &body.source);
 
@@ -211,15 +208,21 @@ async fn cargo_check(
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let success = output.status.success();
-            let errors: Vec<String> = stderr.lines()
+            let errors: Vec<String> = stderr
+                .lines()
                 .filter(|l| l.contains("error"))
                 .map(String::from)
                 .collect();
-            let warnings: Vec<String> = stderr.lines()
+            let warnings: Vec<String> = stderr
+                .lines()
                 .filter(|l| l.contains("warning"))
                 .map(String::from)
                 .collect();
-            HttpResponse::Ok().json(CheckResponse { success, warnings, errors })
+            HttpResponse::Ok().json(CheckResponse {
+                success,
+                warnings,
+                errors,
+            })
         }
         Err(e) => HttpResponse::InternalServerError().json(CheckResponse {
             success: false,
@@ -230,15 +233,14 @@ async fn cargo_check(
 }
 
 /// Run Clippy lints
-async fn clippy(
-    body: web::Json<CheckRequest>,
-) -> HttpResponse {
+async fn clippy(body: web::Json<CheckRequest>) -> HttpResponse {
     let job_id = Uuid::new_v4().to_string();
     let work_dir = format!("/tmp/rust_clippy_{}", job_id);
     let src_dir = format!("{}/src", work_dir);
     let _ = fs::create_dir_all(&src_dir);
 
-    let cargo_toml = "[package]\nname=\"clippy_check\"\nversion=\"0.1.0\"\nedition=\"2021\"\n[dependencies]\n";
+    let cargo_toml =
+        "[package]\nname=\"clippy_check\"\nversion=\"0.1.0\"\nedition=\"2021\"\n[dependencies]\n";
     let _ = fs::write(format!("{}/Cargo.toml", work_dir), cargo_toml);
     let _ = fs::write(format!("{}/src/main.rs", work_dir), &body.source);
 

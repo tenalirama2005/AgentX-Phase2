@@ -25,8 +25,7 @@ async fn translate_cobol(_body: web::Json<serde_json::Value>) -> HttpResponse {
 async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
-    let bind_addr = std::env::var("BIND_ADDR")
-        .unwrap_or("0.0.0.0:8084".to_string());
+    let bind_addr = std::env::var("BIND_ADDR").unwrap_or("0.0.0.0:8084".to_string());
 
     log::info!("AI MCP (deprecated) starting on {}", bind_addr);
     log::info!("Use purple_agent at port 8081 instead");

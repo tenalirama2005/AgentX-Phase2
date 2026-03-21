@@ -11,7 +11,6 @@
 ///   Quorum = any 2 of 3 nodes agree
 ///   Quorum slice for each = any 1 of the other 2 nodes
 ///   Intersection guaranteed when 2/3 agree → martingale restored
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{info, warn};
@@ -41,7 +40,8 @@ impl QuorumSlice {
     /// Check if this node's quorum slice is satisfied given a set of agreeing node IDs.
     /// Per SCP: a node v ratifies a statement if enough of its trusted nodes agree.
     pub fn is_satisfied(&self, agreeing_nodes: &[&str]) -> bool {
-        let count = self.trusted_nodes
+        let count = self
+            .trusted_nodes
             .iter()
             .filter(|trusted| agreeing_nodes.contains(&trusted.as_str()))
             .count();
@@ -81,7 +81,7 @@ impl FbaNetwork {
                     "deepseek_v3_nebius".to_string(),
                     "llama_3_3_70b".to_string(),
                 ],
-                threshold: 1,   // needs 1 of 2 trusted nodes to agree
+                threshold: 1, // needs 1 of 2 trusted nodes to agree
             },
         );
 
@@ -89,10 +89,7 @@ impl FbaNetwork {
             "deepseek_v3_nebius".to_string(),
             QuorumSlice {
                 node_id: "deepseek_v3_nebius".to_string(),
-                trusted_nodes: vec![
-                    "claude_opus_4_6".to_string(),
-                    "llama_3_3_70b".to_string(),
-                ],
+                trusted_nodes: vec!["claude_opus_4_6".to_string(), "llama_3_3_70b".to_string()],
                 threshold: 1,
             },
         );
@@ -123,7 +120,9 @@ impl FbaNetwork {
         let n = node_ids.len();
         // Each node needs ceil(n * quorum_threshold) - 1 peers to agree
         // (minus 1 because the node itself is not in its own trusted list)
-        let threshold = ((n as f64 * quorum_threshold).ceil() as usize).saturating_sub(1).max(1);
+        let threshold = ((n as f64 * quorum_threshold).ceil() as usize)
+            .saturating_sub(1)
+            .max(1);
 
         let mut quorum_slices = HashMap::new();
 
@@ -137,7 +136,7 @@ impl FbaNetwork {
             quorum_slices.insert(
                 node_id.clone(),
                 QuorumSlice {
-                    node_id:       node_id.clone(),
+                    node_id: node_id.clone(),
                     trusted_nodes: trusted,
                     threshold,
                 },
@@ -145,12 +144,11 @@ impl FbaNetwork {
         }
 
         Self {
-            nodes:            node_ids.to_vec(),
+            nodes: node_ids.to_vec(),
             quorum_slices,
             quorum_threshold,
         }
     }
-
 
     /// Find all pairs of nodes whose outputs are semantically similar
     /// Returns: Vec of (node_a, node_b, similarity)
@@ -175,10 +173,7 @@ impl FbaNetwork {
     /// A statement is ratified when every node's quorum slice is satisfied.
     /// For 3-node network: need at least 2 nodes agreeing so that each of those
     /// nodes sees at least 1 trusted peer agreeing — satisfying their quorum slice.
-    fn check_quorum_intersection(
-        &self,
-        agreeing_node_ids: &[&str],
-    ) -> bool {
+    fn check_quorum_intersection(&self, agreeing_node_ids: &[&str]) -> bool {
         if agreeing_node_ids.len() < 2 {
             return false;
         }
@@ -212,7 +207,9 @@ impl FbaNetwork {
     ) -> FbaResult {
         info!(
             "FBA check_consensus: {} nodes, sim_threshold={:.2}, conf_threshold={:.2}",
-            nodes.len(), similarity_threshold, confidence_threshold
+            nodes.len(),
+            similarity_threshold,
+            confidence_threshold
         );
 
         let k_star = bayesian.k_star;
@@ -259,7 +256,9 @@ impl FbaNetwork {
         if !all_confident {
             warn!(
                 "Only {}/{} nodes meet confidence threshold {:.2}",
-                confident_nodes.len(), nodes.len(), confidence_threshold
+                confident_nodes.len(),
+                nodes.len(),
+                confidence_threshold
             );
         }
 
@@ -270,7 +269,10 @@ impl FbaNetwork {
         // Collect all node IDs that are part of at least one agreeing pair
         let mut agreeing_ids: Vec<&str> = Vec::new();
         for (a, b, sim) in &agreeing_pairs {
-            info!("Agreeing pair: {} ↔ {} (sim={:.3})", a.node_id, b.node_id, sim);
+            info!(
+                "Agreeing pair: {} ↔ {} (sim={:.3})",
+                a.node_id, b.node_id, sim
+            );
             if !agreeing_ids.contains(&a.node_id.as_str()) {
                 agreeing_ids.push(a.node_id.as_str());
             }
@@ -288,9 +290,8 @@ impl FbaNetwork {
         );
 
         // Step 5: Martingale satisfied = quorum intersection + confidence + similarity
-        let martingale_satisfied = best_similarity >= similarity_threshold
-            && all_confident
-            && quorum_intersection;
+        let martingale_satisfied =
+            best_similarity >= similarity_threshold && all_confident && quorum_intersection;
 
         let status = if martingale_satisfied {
             "CONSENSUS_REACHED".to_string()
@@ -329,8 +330,7 @@ impl FbaNetwork {
         info!(
             "FBA result: {} | confidence={:.3} | similarity={:.3} | \
              quorum_intersection={} | bayesian={}",
-            status, combined_confidence, best_similarity,
-            quorum_intersection, bayesian_guarantee
+            status, combined_confidence, best_similarity, quorum_intersection, bayesian_guarantee
         );
 
         FbaResult {
@@ -363,8 +363,12 @@ pub struct FbaResult {
 
 /// Semantic Code Equivalence Engine — 5-Layer Analysis
 pub fn compute_code_similarity(code_a: &str, code_b: &str) -> f64 {
-    if code_a.is_empty() && code_b.is_empty() { return 1.0; }
-    if code_a.is_empty() || code_b.is_empty() { return 0.0; }
+    if code_a.is_empty() && code_b.is_empty() {
+        return 1.0;
+    }
+    if code_a.is_empty() || code_b.is_empty() {
+        return 0.0;
+    }
 
     let struct_a = structural_fingerprint(code_a);
     let struct_b = structural_fingerprint(code_b);
@@ -386,11 +390,7 @@ pub fn compute_code_similarity(code_a: &str, code_b: &str) -> f64 {
     let kw_b = keyword_density_vector(code_b);
     let layer5 = cosine_similarity(&kw_a, &kw_b);
 
-    let similarity = 0.20 * layer1
-        + 0.15 * layer2
-        + 0.30 * layer3
-        + 0.15 * layer4
-        + 0.20 * layer5;
+    let similarity = 0.20 * layer1 + 0.15 * layer2 + 0.30 * layer3 + 0.15 * layer4 + 0.20 * layer5;
 
     info!(
         "Similarity layers: struct={:.3} nums={:.3} types={:.3} ops={:.3} kw={:.3} → final={:.3}",
@@ -403,13 +403,11 @@ pub fn compute_code_similarity(code_a: &str, code_b: &str) -> f64 {
 fn structural_fingerprint(code: &str) -> String {
     let mut result = String::new();
     let keywords = [
-        "fn", "let", "mut", "pub", "struct", "impl", "if", "else",
-        "for", "while", "return", "use", "mod", "const", "static",
-        "match", "loop", "break", "continue", "self", "Self",
-        "true", "false", "where", "async", "await", "move",
-        "f64", "f32", "i64", "i32", "i16", "i8", "u64", "u32",
-        "u16", "u8", "usize", "isize", "bool", "String", "str",
-        "Vec", "Option", "Result", "Some", "None", "Ok", "Err",
+        "fn", "let", "mut", "pub", "struct", "impl", "if", "else", "for", "while", "return", "use",
+        "mod", "const", "static", "match", "loop", "break", "continue", "self", "Self", "true",
+        "false", "where", "async", "await", "move", "f64", "f32", "i64", "i32", "i16", "i8", "u64",
+        "u32", "u16", "u8", "usize", "isize", "bool", "String", "str", "Vec", "Option", "Result",
+        "Some", "None", "Ok", "Err",
     ];
 
     let mut word = String::new();
@@ -419,7 +417,12 @@ fn structural_fingerprint(code: &str) -> String {
             word.push(c);
         } else {
             if !word.is_empty() {
-                if word.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                if word
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_digit())
+                    .unwrap_or(false)
+                {
                     result.push_str("NUM");
                 } else if keywords.contains(&word.as_str()) {
                     result.push_str(&word);
@@ -436,7 +439,12 @@ fn structural_fingerprint(code: &str) -> String {
         }
     }
     if !word.is_empty() {
-        if word.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        if word
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+        {
             result.push_str("NUM");
         } else if keywords.contains(&word.as_str()) {
             result.push_str(&word);
@@ -489,15 +497,21 @@ fn normalize_number(s: &str) -> String {
 }
 
 fn compare_numeric_sets(a: &[String], b: &[String]) -> f64 {
-    if a.is_empty() && b.is_empty() { return 1.0; }
-    if a.is_empty() || b.is_empty() { return 0.3; }
+    if a.is_empty() && b.is_empty() {
+        return 1.0;
+    }
+    if a.is_empty() || b.is_empty() {
+        return 0.3;
+    }
 
     let filter_constants = |nums: &[String]| -> std::collections::HashSet<String> {
         nums.iter()
             .filter(|n| {
                 if let Ok(f) = n.parse::<f64>() {
                     f.abs() <= 1000.0 && f.abs() > 0.0
-                } else { false }
+                } else {
+                    false
+                }
             })
             .cloned()
             .collect()
@@ -506,23 +520,29 @@ fn compare_numeric_sets(a: &[String], b: &[String]) -> f64 {
     let set_a = filter_constants(a);
     let set_b = filter_constants(b);
 
-    if set_a.is_empty() && set_b.is_empty() { return 0.8; }
+    if set_a.is_empty() && set_b.is_empty() {
+        return 0.8;
+    }
 
     let intersection = set_a.intersection(&set_b).count();
     let union = set_a.union(&set_b).count();
 
-    if union == 0 { 1.0 } else {
+    if union == 0 {
+        1.0
+    } else {
         let jaccard = intersection as f64 / union as f64;
-        if intersection == set_a.len() && intersection == set_b.len() { 1.0 } else { jaccard }
+        if intersection == set_a.len() && intersection == set_b.len() {
+            1.0
+        } else {
+            jaccard
+        }
     }
 }
 
 fn extract_rust_types(code: &str) -> Vec<String> {
     let type_keywords = [
-        "f64", "f32", "i64", "i32", "i16", "i8",
-        "u64", "u32", "u16", "u8", "usize", "isize",
-        "bool", "String", "str", "Vec", "Option",
-        "Result", "HashMap", "HashSet",
+        "f64", "f32", "i64", "i32", "i16", "i8", "u64", "u32", "u16", "u8", "usize", "isize",
+        "bool", "String", "str", "Vec", "Option", "Result", "HashMap", "HashSet",
     ];
 
     let mut found = Vec::new();
@@ -537,12 +557,18 @@ fn extract_rust_types(code: &str) -> Vec<String> {
 }
 
 fn jaccard_similarity(a: &[String], b: &[String]) -> f64 {
-    if a.is_empty() && b.is_empty() { return 1.0; }
+    if a.is_empty() && b.is_empty() {
+        return 1.0;
+    }
     let set_a: std::collections::HashSet<&String> = a.iter().collect();
     let set_b: std::collections::HashSet<&String> = b.iter().collect();
     let intersection = set_a.intersection(&set_b).count();
     let union = set_a.union(&set_b).count();
-    if union == 0 { 1.0 } else { intersection as f64 / union as f64 }
+    if union == 0 {
+        1.0
+    } else {
+        intersection as f64 / union as f64
+    }
 }
 
 fn extract_operator_sequence(code: &str) -> String {
@@ -552,8 +578,7 @@ fn extract_operator_sequence(code: &str) -> String {
 }
 
 const RUST_KEYWORDS: &[&str] = &[
-    "fn", "let", "mut", "pub", "struct", "impl",
-    "if", "else", "for", "while", "return", "match",
+    "fn", "let", "mut", "pub", "struct", "impl", "if", "else", "for", "while", "return", "match",
     "use", "mod", "const", "async", "await",
 ];
 
@@ -562,7 +587,8 @@ fn keyword_density_vector(code: &str) -> Vec<f64> {
     RUST_KEYWORDS
         .iter()
         .map(|kw| {
-            let count = code.split_whitespace()
+            let count = code
+                .split_whitespace()
                 .filter(|w| {
                     let clean = w.trim_matches(|c: char| !c.is_alphanumeric() && c != '_');
                     clean == *kw
@@ -574,12 +600,18 @@ fn keyword_density_vector(code: &str) -> Vec<f64> {
 }
 
 fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
-    if a.len() != b.len() { return 0.0; }
+    if a.len() != b.len() {
+        return 0.0;
+    }
     let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let mag_a: f64 = a.iter().map(|x| x * x).sum::<f64>().sqrt();
     let mag_b: f64 = b.iter().map(|x| x * x).sum::<f64>().sqrt();
-    if mag_a == 0.0 && mag_b == 0.0 { return 1.0; }
-    if mag_a == 0.0 || mag_b == 0.0 { return 0.5; }
+    if mag_a == 0.0 && mag_b == 0.0 {
+        return 1.0;
+    }
+    if mag_a == 0.0 || mag_b == 0.0 {
+        return 0.5;
+    }
     (dot / (mag_a * mag_b)).clamp(0.0, 1.0)
 }
 
@@ -635,7 +667,9 @@ mod tests {
         assert!(net.check_quorum_intersection(&["claude_opus_4_6", "deepseek_v3_nebius"]));
         // All 3 agree → intersection holds
         assert!(net.check_quorum_intersection(&[
-            "claude_opus_4_6", "deepseek_v3_nebius", "llama_3_3_70b"
+            "claude_opus_4_6",
+            "deepseek_v3_nebius",
+            "llama_3_3_70b"
         ]));
         // Only 1 node → no intersection
         assert!(!net.check_quorum_intersection(&["claude_opus_4_6"]));
@@ -686,10 +720,12 @@ mod tests {
     #[test]
     fn test_quorum_violation_one_node() {
         let network = FbaNetwork::new_three_node();
-        let nodes = vec![
-            make_node("claude_opus_4_6", "Claude Opus 4.6",
-                "fn calculate(x: f64) -> f64 { x * 0.055 }", 0.94),
-        ];
+        let nodes = vec![make_node(
+            "claude_opus_4_6",
+            "Claude Opus 4.6",
+            "fn calculate(x: f64) -> f64 { x * 0.055 }",
+            0.94,
+        )];
         let result = network.check_consensus(&nodes, 0.75, 0.85, &make_bayesian());
         assert_eq!(result.status, "QUORUM_VIOLATION");
         assert!(result.rust_code.is_none());

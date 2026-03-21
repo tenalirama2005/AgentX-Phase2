@@ -9,7 +9,6 @@
 ///   3. Collect results — failed nodes skipped gracefully
 ///   4. Apply FBA quorum intersection (need ≥ 2/3 of responding nodes)
 ///   5. Return FbaResult with consensus Rust code + full per-node report
-
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
 use std::sync::Arc;
@@ -24,27 +23,27 @@ use crate::nebius_client::{call_model, ModelConfig};
 
 #[derive(Debug, Deserialize)]
 pub struct ModelsToml {
-    pub network:  NetworkConfig,
-    pub models:   Vec<ModelConfig>,
+    pub network: NetworkConfig,
+    pub models: Vec<ModelConfig>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct NetworkConfig {
-    pub quorum_threshold:     f64,   // e.g. 0.667
-    pub similarity_threshold: f64,   // e.g. 0.75
-    pub confidence_threshold: f64,   // e.g. 0.80
+    pub quorum_threshold: f64,     // e.g. 0.667
+    pub similarity_threshold: f64, // e.g. 0.75
+    pub confidence_threshold: f64, // e.g. 0.80
     #[allow(dead_code)]
-    pub pass1_max_tokens:     u32,   // 1024 — reserved for future per-network override
+    pub pass1_max_tokens: u32, // 1024 — reserved for future per-network override
     #[allow(dead_code)]
-    pub description:          String, // human-readable label in models.toml
+    pub description: String, // human-readable label in models.toml
 }
 
 // ─── ConsensusConfig — runtime state ─────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct ConsensusConfig {
-    pub models:               Vec<ModelConfig>,
-    pub quorum_threshold:     f64,
+    pub models: Vec<ModelConfig>,
+    pub quorum_threshold: f64,
     pub similarity_threshold: f64,
     pub confidence_threshold: f64,
 }
@@ -52,11 +51,11 @@ pub struct ConsensusConfig {
 impl ConsensusConfig {
     /// Load from models.toml — called once at purple_agent startup
     pub fn from_toml(path: &str) -> Result<Self> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| anyhow!("Cannot read {}: {}", path, e))?;
+        let content =
+            std::fs::read_to_string(path).map_err(|e| anyhow!("Cannot read {}: {}", path, e))?;
 
-        let parsed: ModelsToml = toml::from_str(&content)
-            .map_err(|e| anyhow!("Invalid models.toml: {}", e))?;
+        let parsed: ModelsToml =
+            toml::from_str(&content).map_err(|e| anyhow!("Invalid models.toml: {}", e))?;
 
         info!(
             "📋 Loaded {} models from {} | quorum={:.0}% | sim_threshold={:.2} | conf_threshold={:.2}",
@@ -70,13 +69,17 @@ impl ConsensusConfig {
         for (i, m) in parsed.models.iter().enumerate() {
             info!(
                 "  [{:02}] {} [{}] provider={} pass2_tokens={}",
-                i + 1, m.node_id, m.tier, m.provider, m.pass2_max_tokens
+                i + 1,
+                m.node_id,
+                m.tier,
+                m.provider,
+                m.pass2_max_tokens
             );
         }
 
         Ok(Self {
-            models:               parsed.models,
-            quorum_threshold:     parsed.network.quorum_threshold,
+            models: parsed.models,
+            quorum_threshold: parsed.network.quorum_threshold,
             similarity_threshold: parsed.network.similarity_threshold,
             confidence_threshold: parsed.network.confidence_threshold,
         })
@@ -92,19 +95,16 @@ impl ConsensusConfig {
 // ─── AppState for purple_agent ────────────────────────────────────────────────
 
 pub struct AppState {
-    pub http_client:   reqwest::Client,
-    pub nebius_key:    String,
+    pub http_client: reqwest::Client,
+    pub nebius_key: String,
     pub anthropic_key: String,
-    pub config:        ConsensusConfig,
+    pub config: ConsensusConfig,
 }
 
 // ─── Main Entry Point ─────────────────────────────────────────────────────────
 
 /// Run all 31 models concurrently, apply FBA quorum, return consensus result.
-pub async fn run_consensus(
-    state:        &AppState,
-    cobol_source: &str,
-) -> FbaResult {
+pub async fn run_consensus(state: &AppState, cobol_source: &str) -> FbaResult {
     let bayesian_result = compute_bayesian(cobol_source);
     let k_star = bayesian_result.k_star;
     let n_models = state.config.models.len();
@@ -112,46 +112,48 @@ pub async fn run_consensus(
 
     info!(
         "🚀 Starting 31-node FBA consensus | k*={} | quorum={}/{} | sim={:.2} | conf={:.2}",
-        k_star, quorum_needed, n_models,
+        k_star,
+        quorum_needed,
+        n_models,
         state.config.similarity_threshold,
         state.config.confidence_threshold,
     );
 
     // ── Spawn all model calls concurrently ───────────────────────────────────
-    let client   = Arc::new(state.http_client.clone());
-    let nkey     = Arc::new(state.nebius_key.clone());
-    let akey     = Arc::new(state.anthropic_key.clone());
-    let cobol    = Arc::new(cobol_source.to_string());
-    let configs  = Arc::new(state.config.models.clone());
+    let client = Arc::new(state.http_client.clone());
+    let nkey = Arc::new(state.nebius_key.clone());
+    let akey = Arc::new(state.anthropic_key.clone());
+    let cobol = Arc::new(cobol_source.to_string());
+    let configs = Arc::new(state.config.models.clone());
 
     let mut join_set: JoinSet<(String, Result<FbaNode>)> = JoinSet::new();
 
     for config in configs.iter().cloned() {
-        let client  = Arc::clone(&client);
-        let nkey    = Arc::clone(&nkey);
-        let akey    = Arc::clone(&akey);
-        let cobol   = Arc::clone(&cobol);
+        let client = Arc::clone(&client);
+        let nkey = Arc::clone(&nkey);
+        let akey = Arc::clone(&akey);
+        let cobol = Arc::clone(&cobol);
         let node_id = config.node_id.clone();
 
         join_set.spawn(async move {
-            let result = call_model(
-                &client, &config, &nkey, &akey, &cobol, k_star,
-            ).await;
+            let result = call_model(&client, &config, &nkey, &akey, &cobol, k_star).await;
             (node_id, result)
         });
     }
 
     // ── Collect results ───────────────────────────────────────────────────────
     let mut successful_nodes: Vec<FbaNode> = Vec::new();
-    let mut failed_nodes:     Vec<String>  = Vec::new();
+    let mut failed_nodes: Vec<String> = Vec::new();
 
     while let Some(join_result) = join_set.join_next().await {
         match join_result {
             Ok((node_id, Ok(fba_node))) => {
                 info!(
                     "  ✅ {} → code_len={} confidence={:.2} cot={}",
-                    node_id, fba_node.rust_code.len(),
-                    fba_node.confidence, fba_node.cot_steps_used
+                    node_id,
+                    fba_node.rust_code.len(),
+                    fba_node.confidence,
+                    fba_node.cot_steps_used
                 );
                 successful_nodes.push(fba_node);
             }
@@ -167,8 +169,10 @@ pub async fn run_consensus(
 
     info!(
         "📊 Results: {}/{} nodes succeeded | {} failed | quorum_needed={}",
-        successful_nodes.len(), n_models,
-        failed_nodes.len(), quorum_needed
+        successful_nodes.len(),
+        n_models,
+        failed_nodes.len(),
+        quorum_needed
     );
 
     // Log failed nodes for audit
@@ -178,30 +182,27 @@ pub async fn run_consensus(
 
     // ── Check if enough nodes responded ──────────────────────────────────────
     if successful_nodes.len() < 2 {
-        error!("QUORUM_VIOLATION: only {} nodes responded", successful_nodes.len());
+        error!(
+            "QUORUM_VIOLATION: only {} nodes responded",
+            successful_nodes.len()
+        );
         return FbaResult {
-            status:              "QUORUM_VIOLATION".to_string(),
-            rust_code:           None,
-            confidence:          0.0,
+            status: "QUORUM_VIOLATION".to_string(),
+            rust_code: None,
+            confidence: 0.0,
             semantic_similarity: 0.0,
-            bayesian_guarantee:  "VIOLATED".to_string(),
+            bayesian_guarantee: "VIOLATED".to_string(),
             martingale_satisfied: false,
             k_star,
-            node_results:        successful_nodes,
-            paper_reference:     "arxiv:2507.11768".to_string(),
+            node_results: successful_nodes,
+            paper_reference: "arxiv:2507.11768".to_string(),
         };
     }
 
     // ── Build dynamic FBA network from responding nodes ────────────────────
-    let responding_ids: Vec<String> = successful_nodes
-        .iter()
-        .map(|n| n.node_id.clone())
-        .collect();
+    let responding_ids: Vec<String> = successful_nodes.iter().map(|n| n.node_id.clone()).collect();
 
-    let network = FbaNetwork::new_dynamic(
-        &responding_ids,
-        state.config.quorum_threshold,
-    );
+    let network = FbaNetwork::new_dynamic(&responding_ids, state.config.quorum_threshold);
 
     // ── Run FBA consensus ─────────────────────────────────────────────────────
     let result = network.check_consensus(
@@ -213,8 +214,7 @@ pub async fn run_consensus(
 
     info!(
         "🏁 FBA result: {} | confidence={:.3} | similarity={:.3} | bayesian={}",
-        result.status, result.confidence,
-        result.semantic_similarity, result.bayesian_guarantee
+        result.status, result.confidence, result.semantic_similarity, result.bayesian_guarantee
     );
 
     result
@@ -227,7 +227,7 @@ fn compute_bayesian(cobol_source: &str) -> BayesianResult {
     crate::bayesian::compute_k_star(&BayesianParams {
         cobol_line_count,
         epsilon: 0.01,
-        theta:   2.5,
+        theta: 2.5,
     })
 }
 
@@ -238,20 +238,22 @@ mod tests {
     use super::*;
 
     fn make_test_config(n: usize) -> ConsensusConfig {
-        let models: Vec<ModelConfig> = (0..n).map(|i| ModelConfig {
-            node_id:          format!("node_{:02}", i),
-            model_name:       format!("TestModel-{}", i),
-            provider:         "nebius".to_string(),
-            model_id:         format!("test/model-{}", i),
-            pass2_max_tokens: 4096,
-            temperature:      0.1,
-            family:           "test".to_string(),
-            tier:             "test".to_string(),
-        }).collect();
+        let models: Vec<ModelConfig> = (0..n)
+            .map(|i| ModelConfig {
+                node_id: format!("node_{:02}", i),
+                model_name: format!("TestModel-{}", i),
+                provider: "nebius".to_string(),
+                model_id: format!("test/model-{}", i),
+                pass2_max_tokens: 4096,
+                temperature: 0.1,
+                family: "test".to_string(),
+                tier: "test".to_string(),
+            })
+            .collect();
 
         ConsensusConfig {
             models,
-            quorum_threshold:     0.667,
+            quorum_threshold: 0.667,
             similarity_threshold: 0.75,
             confidence_threshold: 0.80,
         }

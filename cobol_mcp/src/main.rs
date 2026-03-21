@@ -6,13 +6,13 @@
 //   POST /validate_syntax  - Validate COBOL syntax only
 //   GET  /health           - Health check
 
-use actix_web::{web, App, HttpServer, HttpResponse, middleware};
+use actix_web::{middleware, web, App, HttpResponse, HttpServer};
+use log::{error, info};
 use serde::{Deserialize, Serialize};
-use std::process::Command;
-use std::fs;
 use std::env;
+use std::fs;
+use std::process::Command;
 use uuid::Uuid;
-use log::{info, error};
 
 // ─── Request/Response Types ───────────────────────────────────────────────────
 
@@ -46,7 +46,7 @@ pub struct ValidateResponse {
 
 fn get_work_dir(prefix: &str) -> String {
     let job_id = Uuid::new_v4().to_string();
-    let tmp = env::temp_dir();  // C:\Users\<user>\AppData\Local\Temp on Windows
+    let tmp = env::temp_dir(); // C:\Users\<user>\AppData\Local\Temp on Windows
     tmp.join(format!("{}_{}", prefix, job_id))
         .to_string_lossy()
         .to_string()
@@ -61,7 +61,9 @@ async fn compile(body: web::Json<CompileRequest>) -> HttpResponse {
 
     if let Err(e) = fs::create_dir_all(&work_dir) {
         return HttpResponse::InternalServerError().json(CompileResponse {
-            success: false, output: None, compile_log: None,
+            success: false,
+            output: None,
+            compile_log: None,
             error: Some(format!("Failed to create work dir: {}", e)),
         });
     }
@@ -72,7 +74,9 @@ async fn compile(body: web::Json<CompileRequest>) -> HttpResponse {
 
     if let Err(e) = fs::write(&source_path, &body.source) {
         return HttpResponse::InternalServerError().json(CompileResponse {
-            success: false, output: None, compile_log: None,
+            success: false,
+            output: None,
+            compile_log: None,
             error: Some(format!("Failed to write source: {}", e)),
         });
     }
@@ -90,7 +94,8 @@ async fn compile(body: web::Json<CompileRequest>) -> HttpResponse {
                 error!("COBOL compile failed: {}", compile_log);
                 cleanup(&work_dir);
                 return HttpResponse::Ok().json(CompileResponse {
-                    success: false, output: None,
+                    success: false,
+                    output: None,
                     compile_log: Some(compile_log),
                     error: Some("COBOL compilation failed".to_string()),
                 });
@@ -107,8 +112,8 @@ async fn compile(body: web::Json<CompileRequest>) -> HttpResponse {
             let mut exec_cmd = Command::new(&exec_path);
 
             if let Some(input) = &body.input_data {
-                use std::process::Stdio;
                 use std::io::Write;
+                use std::process::Stdio;
 
                 match exec_cmd
                     .stdin(Stdio::piped())
@@ -122,7 +127,8 @@ async fn compile(body: web::Json<CompileRequest>) -> HttpResponse {
                         }
                         match c.wait_with_output() {
                             Ok(exec_output) => {
-                                let stdout = String::from_utf8_lossy(&exec_output.stdout).to_string();
+                                let stdout =
+                                    String::from_utf8_lossy(&exec_output.stdout).to_string();
                                 info!("COBOL execution output: {}", stdout.trim());
                                 cleanup(&work_dir);
                                 return HttpResponse::Ok().json(CompileResponse {
@@ -135,7 +141,8 @@ async fn compile(body: web::Json<CompileRequest>) -> HttpResponse {
                             Err(e) => {
                                 cleanup(&work_dir);
                                 return HttpResponse::InternalServerError().json(CompileResponse {
-                                    success: false, output: None,
+                                    success: false,
+                                    output: None,
                                     compile_log: Some(compile_log),
                                     error: Some(format!("Execution failed: {}", e)),
                                 });
@@ -145,7 +152,8 @@ async fn compile(body: web::Json<CompileRequest>) -> HttpResponse {
                     Err(e) => {
                         cleanup(&work_dir);
                         return HttpResponse::InternalServerError().json(CompileResponse {
-                            success: false, output: None,
+                            success: false,
+                            output: None,
                             compile_log: Some(compile_log),
                             error: Some(format!("Failed to spawn process: {}", e)),
                         });
@@ -169,7 +177,8 @@ async fn compile(body: web::Json<CompileRequest>) -> HttpResponse {
                 Err(e) => {
                     cleanup(&work_dir);
                     HttpResponse::InternalServerError().json(CompileResponse {
-                        success: false, output: None,
+                        success: false,
+                        output: None,
                         compile_log: Some(compile_log),
                         error: Some(format!("Execution failed: {}", e)),
                     })
@@ -180,7 +189,9 @@ async fn compile(body: web::Json<CompileRequest>) -> HttpResponse {
             error!("Failed to run cobc: {}", e);
             cleanup(&work_dir);
             HttpResponse::InternalServerError().json(CompileResponse {
-                success: false, output: None, compile_log: None,
+                success: false,
+                output: None,
+                compile_log: None,
                 error: Some(format!("cobc not found or failed: {}", e)),
             })
         }
@@ -204,11 +215,24 @@ async fn validate_syntax(body: web::Json<ValidateRequest>) -> HttpResponse {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let valid = output.status.success();
             let errors: Vec<String> = if !valid {
-                stderr.lines().filter(|l| l.contains("error")).map(String::from).collect()
-            } else { vec![] };
-            let warnings: Vec<String> = stderr.lines()
-                .filter(|l| l.contains("warning")).map(String::from).collect();
-            HttpResponse::Ok().json(ValidateResponse { valid, errors, warnings })
+                stderr
+                    .lines()
+                    .filter(|l| l.contains("error"))
+                    .map(String::from)
+                    .collect()
+            } else {
+                vec![]
+            };
+            let warnings: Vec<String> = stderr
+                .lines()
+                .filter(|l| l.contains("warning"))
+                .map(String::from)
+                .collect();
+            HttpResponse::Ok().json(ValidateResponse {
+                valid,
+                errors,
+                warnings,
+            })
         }
         Err(e) => HttpResponse::InternalServerError().json(ValidateResponse {
             valid: false,
@@ -244,10 +268,10 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(|| {
         App::new()
             .wrap(middleware::Logger::default())
-            .route("/compile",         web::post().to(compile))
-            .route("/execute",         web::post().to(compile))
+            .route("/compile", web::post().to(compile))
+            .route("/execute", web::post().to(compile))
             .route("/validate_syntax", web::post().to(validate_syntax))
-            .route("/health",          web::get().to(health))
+            .route("/health", web::get().to(health))
     })
     .bind(&bind_addr)?
     .run()

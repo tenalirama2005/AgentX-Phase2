@@ -1,21 +1,20 @@
 #!/bin/bash
 # ============================================================
-# AgentX-Phase2 — Deploy to Kubernetes via vind (vCluster in Docker)
+# AgentX-Phase2 — Deploy to Kubernetes via kind (kind in Docker)
 # Author: Venkat Nagala | For the Cloud By the Cloud
 #
-# vind = vCluster in Docker — KinD replacement with:
+# kind = kind in Docker — KinD replacement with:
 #   LoadBalancer works out of the box
-#   Free vCluster Platform UI (accessible from anywhere)
+#   Free Kiali Platform UI (accessible from anywhere)
 #   Sleep/wake cluster
 #   Add EC2/GPU nodes via VPN
 #   Pull-through Docker registry cache
-#   GitHub: https://github.com/loft-sh/vind
+#   GitHub: https://github.com/kubernetes-sigs/kind
 #
 # Prerequisites:
 #   Docker Desktop running (Kubernetes NOT required)
-#   vCluster CLI: curl -L -o vcluster https://github.com/loft-sh/vcluster/releases/latest/download/vcluster-linux-amd64
-#                 sudo install -c -m 0755 vcluster /usr/local/bin
-#   GitHub CLI:   sudo apt install gh -y && gh auth login
+#   kind CLI: curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
+#             chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
 #   .env file with real API keys in project root
 #
 # Usage:
@@ -27,7 +26,7 @@
 #   ./deploy.sh --sleep          # sleep the cluster
 #   ./deploy.sh --wake           # wake the cluster
 #   ./deploy.sh --teardown       # delete cluster
-#   ./deploy.sh --ui             # open vCluster Platform UI
+#   ./deploy.sh --ui             # open Kiali Platform UI
 #
 # Monitor GitHub Actions:
 #   gh workflow run agentx-deploy.yml --repo tenalirama2005/AgentX-Phase2 \
@@ -89,47 +88,40 @@ fi
 
 # ── Sleep ────────────────────────────────────────────────────
 if [ "$SLEEP_CLUSTER" = true ]; then
-    yellow "Sleeping vind cluster '$CLUSTER_NAME'..."
-    docker stop vcluster.cp.$CLUSTER_NAME
+    yellow "Sleeping kind cluster '$CLUSTER_NAME'..."
+    docker stop agentx-phase2-control-plane
     green "Cluster sleeping. Run ./deploy.sh --wake to resume."
     exit 0
 fi
 
 # ── Wake ─────────────────────────────────────────────────────
 if [ "$WAKE_CLUSTER" = true ]; then
-    yellow "Waking vind cluster '$CLUSTER_NAME'..."
-    docker start vcluster.cp.$CLUSTER_NAME
+    yellow "Waking kind cluster '$CLUSTER_NAME'..."
+    docker start agentx-phase2-control-plane
     sleep 10
-    vcluster connect $CLUSTER_NAME --driver docker
+    kubectl config use-context kind-agentx-phase2
     green "Cluster awake and connected."
     exit 0
 fi
 
 # ── UI ───────────────────────────────────────────────────────
 if [ "$UI" = true ]; then
-    cyan "Starting vCluster Platform UI..."
-    vcluster platform start --reset 2>&1 | grep -v -i "password\|######\|LOGIN"
-    sleep 5
-    kubectl get pods -n vcluster-platform || true
-    yellow "  Port-forwarding loft to http://localhost:8888 ..."
-    kubectl port-forward svc/loft 8888:80 -n vcluster-platform &
+    cyan "Starting Kiali Platform UI..."
+    kubectl port-forward svc/kiali 20001:20001 -n istio-system &
     sleep 3
-    # Open browser (WSL2 + Windows + Linux)
     if command -v wslview &> /dev/null; then
-        wslview http://localhost:8888
-    elif command -v xdg-open &> /dev/null; then
-        xdg-open http://localhost:8888
+        wslview http://localhost:20001
     else
-        green "  Open browser: http://localhost:8888"
+        green "  Open browser: http://localhost:20001"
     fi
-    green "  vCluster Platform UI: http://localhost:8888"
+    green "  Kiali Dashboard: http://localhost:20001"
     exit 0
 fi
 
 # ── Teardown ─────────────────────────────────────────────────
 if [ "$TEARDOWN" = true ]; then
-    yellow "Deleting vind cluster '$CLUSTER_NAME'..."
-    vcluster delete $CLUSTER_NAME
+    yellow "Deleting kind cluster '$CLUSTER_NAME'..."
+    kind delete cluster --name $CLUSTER_NAME
     green "Cluster deleted."
     exit 0
 fi
@@ -155,27 +147,45 @@ if [ "$RUN_PIPELINE" = true ]; then
     REVIEW=$(echo $PR | python3 -c "import sys,json; print(json.load(sys.stdin).get('review_folder',''))")
     S3_OUT=$(echo $PR | python3 -c "import sys,json; print(json.load(sys.stdin).get('s3_output_key',''))")
 
-    # Fetch per-node FBA report
-    if [ -n "$REVIEW" ]; then
-        REPORT_BODY="{\"bucket\":\"$S3_BUCKET\",\"key\":\"$REVIEW/fba_report/fba_report.json\"}"
-        REPORT=$(curl -s -X POST http://localhost:8082/fetch_source \
-            -H "Content-Type: application/json" \
-            -d "$REPORT_BODY")
+# Fetch per-node FBA report
+if [ -n "$REVIEW" ]; then
+   REPORT_BODY="{\"bucket\":\"$S3_BUCKET\",\"key\":\"$REVIEW/fba_report/fba_report.json\"}"
+   REPORT=$(curl -s --max-time 30 -X POST http://localhost:8082/fetch_source \
+       -H "Content-Type: application/json" \
+       -H "X-AgentGateway-Token: agentx-internal-token" \
+       -d "$REPORT_BODY")
 
-        echo ""
-        cyan "================================================="
-        cyan " FBA Node Results -- Thirty One Models     arxiv:2507.11768"
-        cyan "================================================="
+   echo ""
+   cyan "================================================="
+   cyan " FBA Node Results -- Thirty One Models     arxiv:2507.11768"
+   cyan "================================================="
 
-        echo $REPORT | python3 -c "
+   echo $REPORT | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 content = json.loads(d.get('content','{}'))
 nodes = sorted(content.get('nodes',[]), key=lambda x: x.get('confidence',0), reverse=True)
+print('')
+print('  Model                            Conf  Bar')
+print('  ' + '-'*55)
 for i, n in enumerate(nodes, 1):
-    conf = n.get('confidence', 0)
-    icon = '[OK]' if conf >= 0.85 else '[WARN]' if conf >= 0.70 else '[LOW]'
-    print(f\"  [{i:02d}] {n['node_id']:<35} {conf:.1%}  {icon}\")
+   conf = n.get('confidence', 0)
+   pct = int(conf * 100)
+   bar_len = int(conf * 25)
+   empty_len = 25 - bar_len
+   if conf >= 0.85:
+        color = '\033[0;33m'
+        icon = '[OK]'
+   elif conf >= 0.70:
+        color = '\033[0;34m'
+        icon = '[WARN]'
+   else:
+        color = '\033[0;31m'
+        icon = '[LOW]'
+   reset = '\033[0m'
+   bar = color + chr(9608) * bar_len + reset + chr(9617) * empty_len
+   print(f'  [{i:02d}] {n[\"node_id\"]:<28} {pct:3d}%  |{bar}| {icon}')
+print('  ' + '-'*55)
 "
     fi
 
@@ -184,11 +194,29 @@ for i, n in enumerate(nodes, 1):
     green "  Status    : $FBA_STATUS"
     green "  Confidence: $CONFIDENCE"
     green "  Similarity: $SIMILARITY"
-    green "  k*        : $K_STAR nodes in consensus"
+    green "  k*        : $K_STAR reasoning steps per model (Bayesian minimum)"
+    cyan "             k* = ceil(θ × √n × log(1/ε)) where n = COBOL line count"
+    cyan "             Fixed for interest_calc.cbl — changes only if COBOL input changes"
     green "  Guarantee : $GUARANTEE"
     yellow "  Paper     : arxiv:2507.11768"
     echo "  S3 Output : $S3_OUT"
-    echo "  Review    : $REVIEW"
+    PRESIGNED=$(echo $PR | python3 -c "import sys,json; print(json.load(sys.stdin).get('presigned_url',''))")
+    if [ -n "$PRESIGNED" ]; then
+        cyan "  Download  : (pre-signed URL valid 1 hour)"
+        echo "  $PRESIGNED"
+    fi
+    if [ -n "$REVIEW" ]; then
+        # Generate presigned URL for FBA report
+        FBA_REPORT_URL=$(curl -s --max-time 10 \
+            -X POST http://localhost:8082/generate_presigned_url \
+            -H "Content-Type: application/json" \
+            -H "X-AgentGateway-Token: agentx-internal-token" \
+            -d "{\"bucket\":\"$S3_BUCKET\",\"key\":\"$REVIEW/fba_report/fba_report.json\"}" | \
+            python3 -c "import sys,json; print(json.load(sys.stdin).get('presigned_url',''))")
+        cyan "  FBA Report: (pre-signed URL valid 1 hour)"
+        echo "  $FBA_REPORT_URL"
+        cyan "  Per-node  : $REVIEW/<model_name>/interest_calc.rs"
+    fi
     cyan "================================================="
     exit 0
 fi
@@ -290,7 +318,7 @@ fi
 
 # ════════════════════════════════════════════════════════════
 cyan "\n=================================================="
-cyan " AgentX-Phase2 -- Deploy via vind (vCluster in Docker)"
+cyan " AgentX-Phase2 -- Deploy via kind (kind in Docker)"
 cyan "=================================================="
 
 # ── [1/7] Pre-flight ─────────────────────────────────────────
@@ -302,14 +330,13 @@ if ! docker info > /dev/null 2>&1; then
 fi
 green "  Docker: running"
 
-if ! command -v vcluster &> /dev/null; then
-    red "  vCluster CLI not found."
-    yellow "  Install: curl -L -o vcluster https://github.com/loft-sh/vcluster/releases/latest/download/vcluster-linux-amd64"
-    yellow "           sudo install -c -m 0755 vcluster /usr/local/bin"
+if ! command -v kind &> /dev/null; then
+    red "  kind not found."
+    yellow "  Install: curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64"
+    yellow "           chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind"
     exit 1
 fi
-green "  vCluster CLI: $(vcluster version 2>/dev/null | head -1)"
-
+green "  kind: $(kind version)"
 # ── [2/7] Build images ───────────────────────────────────────
 if [ "$BUILD_IMAGES" = true ]; then
     cyan "\n[2/7] Building and pushing Docker images (rust:1.94)"
@@ -334,31 +361,22 @@ else
     cyan "\n[2/7] Skipping image build (use --build-images to rebuild)"
 fi
 
-# ── [3/7] Create or connect vind cluster ─────────────────────
-cyan "\n[3/7] vind cluster: $CLUSTER_NAME"
+# ── [3/7] Create or connect kind cluster ─────────────────────
+cyan "\n[3/7] kind cluster: $CLUSTER_NAME"
 
-CONTAINER_NAME="vcluster.cp.$CLUSTER_NAME"
-if docker ps -a --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
     yellow "  Cluster '$CLUSTER_NAME' already exists -- connecting..."
-    vcluster connect $CLUSTER_NAME --driver docker
+    kubectl config use-context kind-$CLUSTER_NAME
     green "  Connected to existing cluster"
 else
-    yellow "  Creating vind cluster '$CLUSTER_NAME'..."
-    cat > /tmp/agentx-vind.yaml << 'EOF'
-experimental:
-  docker:
-    registryProxy:
-      enabled: true
-    loadBalancer:
-      enabled: true
-      forwardPorts: true
-EOF
-    vcluster create $CLUSTER_NAME --driver docker --values /tmp/agentx-vind.yaml
+    yellow "  Creating kind cluster '$CLUSTER_NAME'..."
+    printf "apiVersion: kind.x-k8s.io/v1alpha4\nkind: Cluster\nnodes:\n- role: control-plane\n" > /tmp/kind-config.yaml
+    kind create cluster --name $CLUSTER_NAME --config /tmp/kind-config.yaml --wait 60s
     green "  Cluster '$CLUSTER_NAME' created and connected"
 fi
 
 kubectl get nodes > /dev/null 2>&1 || { red "  Cannot reach cluster."; exit 1; }
-green "  kubectl connected to vind cluster"
+green "  kubectl connected to kind cluster"
 
 # ── [4/7] Load .env ──────────────────────────────────────────
 cyan "\n[4/7] Loading secrets from .env"
@@ -437,7 +455,7 @@ kubectl rollout restart deployment -n $NAMESPACE > /dev/null
 # ── [7/7] Wait for rollout ───────────────────────────────────
 cyan "\n[7/7] Waiting for deployments to be ready"
 yellow "  First run: 3-5 min (Docker Hub pull)"
-yellow "  Subsequent runs: ~30s (vind registry cache)"
+yellow "  Subsequent runs: ~30s (kind registry cache)"
 
 for d in agent-gateway s3-mcp cobol-mcp ai-mcp rust-mcp purple-agent green-agent; do
     yellow "  Waiting: $d..."
@@ -480,7 +498,7 @@ cyan "\n=================================================="
 cyan " AgentX-Phase2 is Running"
 cyan "=================================================="
 green ""
-green "  vind cluster : $CLUSTER_NAME"
+green "  kind cluster : $CLUSTER_NAME"
 green "  Namespace    : $NAMESPACE"
 green ""
 green "  green-agent  : http://localhost:8080   Orchestrator (pipeline entry)"
@@ -497,7 +515,7 @@ yellow "  ./deploy.sh --test-security  # prove JWT RBAC blocks purple_agent from
 yellow "  ./deploy.sh --status         # pod status"
 yellow "  ./deploy.sh --sleep          # sleep cluster"
 yellow "  ./deploy.sh --wake           # wake cluster"
-yellow "  ./deploy.sh --ui             # vCluster Platform UI"
+yellow "  ./deploy.sh --ui             # kiali Platform UI"
 yellow "  ./deploy.sh --teardown       # delete cluster"
 yellow "  ./deploy.sh --build-images   # rebuild all Docker images"
 cyan ""

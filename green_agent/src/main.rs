@@ -25,8 +25,8 @@
 // arxiv:2507.11768 — Bayesian-in-Realization FBA guarantee
 
 use actix_web::{middleware, web, App, HttpResponse, HttpServer};
-use serde::{Deserialize, Serialize};
 use log::{error, info, warn};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 // ─── Port Constants ───────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ pub struct ModernizeResponse {
     pub k_star: Option<usize>,
     pub semantic_similarity: Option<f64>,
     pub paper_reference: String,
-    pub review_folder: Option<String>,   // ← NEW: S3 path to per-node outputs
+    pub review_folder: Option<String>, // ← NEW: S3 path to per-node outputs
     pub error: Option<String>,
 }
 
@@ -145,8 +145,8 @@ struct PurpleAgentRequest {
 /// Per-node result from FBA — matches FbaNode fields in purple_agent/src/fba.rs
 #[derive(Deserialize, Serialize, Clone)]
 struct FbaNodeResult {
-    pub node_id: String,         // "claude_opus_4_6", "deepseek_v3_nebius", "llama_3_3_70b"
-    pub model_name: String,      // human-readable model name
+    pub node_id: String, // "claude_opus_4_6", "deepseek_v3_nebius", "llama_3_3_70b"
+    pub model_name: String, // human-readable model name
     pub rust_code: String,
     pub confidence: f64,
     pub cot_steps_used: usize,
@@ -158,11 +158,11 @@ struct PurpleAgentResponse {
     rust_code: Option<String>,
     confidence: f64,
     bayesian_guarantee: String,
-    k_star: usize,               // usize to match FbaResult in fba.rs
+    k_star: usize, // usize to match FbaResult in fba.rs
     semantic_similarity: f64,
     paper_reference: String,
     //martingale_satisfied: bool,
-    node_results: Vec<FbaNodeResult>,  // always present in FbaResult
+    node_results: Vec<FbaNodeResult>, // always present in FbaResult
 }
 
 // ─── Pipeline Steps ───────────────────────────────────────────────────────────
@@ -174,12 +174,21 @@ async fn step1_fetch_cobol(
     key: &str,
 ) -> Result<String, String> {
     info!("📥 Step 1: Fetching COBOL from s3://{}/{}", bucket, key);
+    let gateway_token = std::env::var("GATEWAY_INTERNAL_TOKEN")
+        .unwrap_or_else(|_| "agentx-internal-token".to_string());
     let response = client
         .post(format!("{}/fetch_source", s3_mcp_url))
-        .json(&S3FetchRequest { bucket: bucket.to_string(), key: key.to_string() })
-        .send().await
+        .header("X-AgentGateway-Token", gateway_token)
+        .json(&S3FetchRequest {
+            bucket: bucket.to_string(),
+            key: key.to_string(),
+        })
+        .send()
+        .await
         .map_err(|e| format!("s3_mcp unreachable: {}", e))?;
-    let result: S3FetchResponse = response.json().await
+    let result: S3FetchResponse = response
+        .json()
+        .await
         .map_err(|e| format!("Invalid s3_mcp response: {}", e))?;
     if result.success {
         let content = result.content.ok_or("S3 returned empty content")?;
@@ -198,10 +207,16 @@ async fn step2_compile_cobol(
     info!("⚙️  Step 2: Compiling COBOL via cobol_mcp");
     let response = client
         .post(format!("{}/compile", cobol_mcp_url))
-        .json(&CobolCompileRequest { source: cobol_source.to_string(), input_data: None })
-        .send().await
+        .json(&CobolCompileRequest {
+            source: cobol_source.to_string(),
+            input_data: None,
+        })
+        .send()
+        .await
         .map_err(|e| format!("cobol_mcp unreachable: {}", e))?;
-    let result: CobolCompileResponse = response.json().await
+    let result: CobolCompileResponse = response
+        .json()
+        .await
         .map_err(|e| format!("Invalid cobol_mcp response: {}", e))?;
     if result.success {
         let output = result.output.unwrap_or_default();
@@ -222,16 +237,21 @@ async fn step3_fba_consensus(
     info!("🟣 Step 3: FBA consensus via purple_agent (arxiv:2507.11768)");
     let response = client
         .post(format!("{}/modernize", purple_agent_url))
-        .json(&PurpleAgentRequest { cobol_source: cobol_source.to_string() })
+        .json(&PurpleAgentRequest {
+            cobol_source: cobol_source.to_string(),
+        })
         .timeout(std::time::Duration::from_secs(3600))
-        .send().await
+        .send()
+        .await
         .map_err(|e| format!("purple_agent unreachable: {}", e))?;
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         return Err(format!("purple_agent HTTP {}: {}", status, body));
     }
-    let result: PurpleAgentResponse = response.json().await
+    let result: PurpleAgentResponse = response
+        .json()
+        .await
         .map_err(|e| format!("Invalid purple_agent response: {}", e))?;
     info!(
         "✅ Step 3: FBA {} | confidence={:.3} | similarity={:.3} | k*={}",
@@ -248,16 +268,22 @@ async fn step4_save_rust(
     rust_code: &str,
 ) -> Result<(String, Option<String>), String> {
     info!("📤 Step 4: Saving Rust to s3://{}/{}", bucket, output_key);
+    let gateway_token = std::env::var("GATEWAY_INTERNAL_TOKEN")
+        .unwrap_or_else(|_| "agentx-internal-token".to_string());
     let response = client
         .post(format!("{}/save_output", s3_mcp_url))
+        .header("X-AgentGateway-Token", gateway_token)
         .json(&S3SaveRequest {
             bucket: bucket.to_string(),
             key: output_key.to_string(),
             content: rust_code.to_string(),
         })
-        .send().await
+        .send()
+        .await
         .map_err(|e| format!("s3_mcp unreachable on save: {}", e))?;
-    let result: S3SaveResponse = response.json().await
+    let result: S3SaveResponse = response
+        .json()
+        .await
         .map_err(|e| format!("Invalid s3_mcp save response: {}", e))?;
     if result.success {
         info!("✅ Step 4: Rust saved to s3://{}/{}", bucket, result.key);
@@ -273,11 +299,12 @@ async fn step4_save_rust(
 ///   modernized/review/<uuid>/deepseek_v3/<filename>.rs
 ///   modernized/review/<uuid>/llama_70b/<filename>.rs
 ///   modernized/review/<uuid>/fba_report/fba_report.json
+#[allow(clippy::too_many_arguments)]
 async fn step4b_save_node_outputs(
     client: &reqwest::Client,
     s3_mcp_url: &str,
     bucket: &str,
-    base_filename: &str,         // e.g. "interest_calc.rs"
+    base_filename: &str, // e.g. "interest_calc.rs"
     node_results: &[FbaNodeResult],
     fba_status: &str,
     confidence: f64,
@@ -298,7 +325,7 @@ async fn step4b_save_node_outputs(
         }
         let key = format!("{}/{}/{}", review_base, node.node_id, base_filename);
         match step4_save_rust(client, s3_mcp_url, bucket, &key, &node.rust_code).await {
-            Ok(_)  => info!("  ✅ Saved {}/{}", node.node_id, base_filename),
+            Ok(_) => info!("  ✅ Saved {}/{}", node.node_id, base_filename),
             Err(e) => warn!("  ⚠️ Failed to save {}: {}", node.node_id, e),
         }
     }
@@ -323,68 +350,92 @@ async fn step4b_save_node_outputs(
 
     let report_key = format!("{}/fba_report/fba_report.json", review_base);
     match step4_save_rust(
-        client, s3_mcp_url, bucket, &report_key,
+        client,
+        s3_mcp_url,
+        bucket,
+        &report_key,
         &serde_json::to_string_pretty(&report).unwrap_or_default(),
-    ).await {
-        Ok(_)  => info!("  ✅ Saved fba_report/fba_report.json"),
+    )
+    .await
+    {
+        Ok(_) => info!("  ✅ Saved fba_report/fba_report.json"),
         Err(e) => warn!("  ⚠️ Failed to save fba_report: {}", e),
     }
 
-    info!("✅ Step 4b: Per-node review folder: s3://{}/{}/", bucket, review_base);
+    info!(
+        "✅ Step 4b: Per-node review folder: s3://{}/{}/",
+        bucket, review_base
+    );
     review_base
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
-async fn modernize(
-    state: web::Data<AppState>,
-    req: web::Json<ModernizeRequest>,
-) -> HttpResponse {
+async fn modernize(state: web::Data<AppState>, req: web::Json<ModernizeRequest>) -> HttpResponse {
     info!("🟢 Green Agent: Starting pipeline for {}", req.s3_key);
     let paper_ref = "arxiv:2507.11768".to_string();
 
     // Derive filenames
-    let base_filename = req.s3_key
+    let base_filename = req
+        .s3_key
         .trim_start_matches(COBOL_PREFIX)
         .replace(".cbl", ".rs");
-    let run_id   = Uuid::new_v4().to_string();
+    let run_id = Uuid::new_v4().to_string();
     let output_key = format!("{}{}/{}", RUST_PREFIX, run_id, base_filename);
 
     // ── Step 1: Fetch COBOL ──────────────────────────────────────────────────
     let cobol_source = match step1_fetch_cobol(
-        &state.http_client, &state.s3_mcp_url, &state.s3_bucket, &req.s3_key,
-    ).await {
+        &state.http_client,
+        &state.s3_mcp_url,
+        &state.s3_bucket,
+        &req.s3_key,
+    )
+    .await
+    {
         Ok(s) => s,
         Err(e) => {
             error!("❌ Step 1 failed: {}", e);
             return HttpResponse::InternalServerError().json(ModernizeResponse {
                 status: format!("FAILED at Step 1 (S3 fetch): {}", e),
                 s3_input_key: req.s3_key.clone(),
-                s3_output_key: None, presigned_url: None, cobol_output: None,
-                fba_status: None, fba_confidence: None, bayesian_guarantee: None,
-                k_star: None, semantic_similarity: None,
-                paper_reference: paper_ref, review_folder: None, error: Some(e),
+                s3_output_key: None,
+                presigned_url: None,
+                cobol_output: None,
+                fba_status: None,
+                fba_confidence: None,
+                bayesian_guarantee: None,
+                k_star: None,
+                semantic_similarity: None,
+                paper_reference: paper_ref,
+                review_folder: None,
+                error: Some(e),
             });
         }
     };
 
     // ── Step 2: Compile COBOL ────────────────────────────────────────────────
-    let cobol_output = match step2_compile_cobol(
-        &state.http_client, &state.cobol_mcp_url, &cobol_source,
-    ).await {
-        Ok(o) => o,
-        Err(e) => {
-            error!("❌ Step 2 failed: {}", e);
-            return HttpResponse::InternalServerError().json(ModernizeResponse {
-                status: format!("FAILED at Step 2 (COBOL compile): {}", e),
-                s3_input_key: req.s3_key.clone(),
-                s3_output_key: None, presigned_url: None, cobol_output: None,
-                fba_status: None, fba_confidence: None, bayesian_guarantee: None,
-                k_star: None, semantic_similarity: None,
-                paper_reference: paper_ref, review_folder: None, error: Some(e),
-            });
-        }
-    };
+    let cobol_output =
+        match step2_compile_cobol(&state.http_client, &state.cobol_mcp_url, &cobol_source).await {
+            Ok(o) => o,
+            Err(e) => {
+                error!("❌ Step 2 failed: {}", e);
+                return HttpResponse::InternalServerError().json(ModernizeResponse {
+                    status: format!("FAILED at Step 2 (COBOL compile): {}", e),
+                    s3_input_key: req.s3_key.clone(),
+                    s3_output_key: None,
+                    presigned_url: None,
+                    cobol_output: None,
+                    fba_status: None,
+                    fba_confidence: None,
+                    bayesian_guarantee: None,
+                    k_star: None,
+                    semantic_similarity: None,
+                    paper_reference: paper_ref,
+                    review_folder: None,
+                    error: Some(e),
+                });
+            }
+        };
 
     // ── Step 3: FBA Consensus ────────────────────────────────────────────────
     if req.skip_fba {
@@ -392,30 +443,39 @@ async fn modernize(
         return HttpResponse::Ok().json(ModernizeResponse {
             status: "✅ SUCCESS — FBA skipped".to_string(),
             s3_input_key: req.s3_key.clone(),
-            s3_output_key: None, presigned_url: None,
+            s3_output_key: None,
+            presigned_url: None,
             cobol_output: Some(cobol_output),
             fba_status: Some("SKIPPED".to_string()),
-            fba_confidence: None, bayesian_guarantee: None,
-            k_star: None, semantic_similarity: None,
-            paper_reference: paper_ref, review_folder: None, error: None,
+            fba_confidence: None,
+            bayesian_guarantee: None,
+            k_star: None,
+            semantic_similarity: None,
+            paper_reference: paper_ref,
+            review_folder: None,
+            error: None,
         });
     }
 
-    let fba = match step3_fba_consensus(
-        &state.http_client, &state.purple_agent_url, &cobol_source,
-    ).await {
+    let fba = match step3_fba_consensus(&state.http_client, &state.purple_agent_url, &cobol_source)
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             warn!("⚠️ Purple Agent unavailable: {}", e);
             return HttpResponse::Ok().json(ModernizeResponse {
                 status: "⚠️ PARTIAL — Purple Agent offline".to_string(),
                 s3_input_key: req.s3_key.clone(),
-                s3_output_key: None, presigned_url: None,
+                s3_output_key: None,
+                presigned_url: None,
                 cobol_output: Some(cobol_output),
                 fba_status: Some("UNAVAILABLE".to_string()),
-                fba_confidence: None, bayesian_guarantee: None,
-                k_star: None, semantic_similarity: None,
-                paper_reference: paper_ref, review_folder: None,
+                fba_confidence: None,
+                bayesian_guarantee: None,
+                k_star: None,
+                semantic_similarity: None,
+                paper_reference: paper_ref,
+                review_folder: None,
                 error: Some(e),
             });
         }
@@ -425,15 +485,25 @@ async fn modernize(
 
     // ── Step 4b: Always save per-node outputs + FBA report ───────────────────
     let review_folder = step4b_save_node_outputs(
-        &state.http_client, &state.s3_mcp_url, &state.s3_bucket,
-        &base_filename, &node_results,
-        &fba.status, fba.confidence, fba.semantic_similarity,
-        fba.k_star, &fba.bayesian_guarantee,
-    ).await;
+        &state.http_client,
+        &state.s3_mcp_url,
+        &state.s3_bucket,
+        &base_filename,
+        &node_results,
+        &fba.status,
+        fba.confidence,
+        fba.semantic_similarity,
+        fba.k_star,
+        &fba.bayesian_guarantee,
+    )
+    .await;
 
     // ── FBA DISAGREEMENT: return with review folder, no consensus save ────────
     if fba.status != "CONSENSUS_REACHED" {
-        warn!("⚠️ FBA {} — saved per-node outputs for human review", fba.status);
+        warn!(
+            "⚠️ FBA {} — saved per-node outputs for human review",
+            fba.status
+        );
         return HttpResponse::Ok().json(ModernizeResponse {
             status: format!("FBA {} — see review folder ⚠️", fba.status),
             s3_input_key: req.s3_key.clone(),
@@ -446,7 +516,7 @@ async fn modernize(
             k_star: Some(fba.k_star),
             semantic_similarity: Some(fba.semantic_similarity),
             paper_reference: fba.paper_reference,
-            review_folder: Some(review_folder),  // ← points to per-node S3 outputs
+            review_folder: Some(review_folder), // ← points to per-node S3 outputs
             error: None,
         });
     }
@@ -457,7 +527,8 @@ async fn modernize(
         return HttpResponse::Ok().json(ModernizeResponse {
             status: "FAILED — no Rust code produced".to_string(),
             s3_input_key: req.s3_key.clone(),
-            s3_output_key: None, presigned_url: None,
+            s3_output_key: None,
+            presigned_url: None,
             cobol_output: Some(cobol_output),
             fba_status: Some("CONSENSUS_REACHED".to_string()),
             fba_confidence: Some(fba.confidence),
@@ -471,11 +542,19 @@ async fn modernize(
     }
 
     let (saved_key, presigned_url) = match step4_save_rust(
-        &state.http_client, &state.s3_mcp_url,
-        &state.s3_bucket, &output_key, &rust_code,
-    ).await {
+        &state.http_client,
+        &state.s3_mcp_url,
+        &state.s3_bucket,
+        &output_key,
+        &rust_code,
+    )
+    .await
+    {
         Ok((k, u)) => (Some(k), u),
-        Err(e) => { error!("❌ Step 4 failed: {}", e); (None, None) }
+        Err(e) => {
+            error!("❌ Step 4 failed: {}", e);
+            (None, None)
+        }
     };
 
     info!("🏁 Pipeline complete: {} → {}", req.s3_key, output_key);
@@ -492,7 +571,7 @@ async fn modernize(
         k_star: Some(fba.k_star),
         semantic_similarity: Some(fba.semantic_similarity),
         paper_reference: fba.paper_reference,
-        review_folder: Some(review_folder),  // ← always present
+        review_folder: Some(review_folder), // ← always present
         error: None,
     })
 }
@@ -508,30 +587,75 @@ async fn modernize_batch(
     let mut failed = 0usize;
 
     for key in &req.s3_keys {
-        let single = ModernizeRequest { s3_key: key.clone(), skip_fba: req.skip_fba };
+        let single = ModernizeRequest {
+            s3_key: key.clone(),
+            skip_fba: req.skip_fba,
+        };
         let resp = modernize(state.clone(), web::Json(single)).await;
-        let bytes = actix_web::body::to_bytes(resp.into_body()).await.unwrap_or_default();
+        let bytes = actix_web::body::to_bytes(resp.into_body())
+            .await
+            .unwrap_or_default();
         if let Ok(r) = serde_json::from_slice::<ModernizeResponse>(&bytes) {
-            if r.status.contains("SUCCESS") { succeeded += 1; } else { failed += 1; }
+            if r.status.contains("SUCCESS") {
+                succeeded += 1;
+            } else {
+                failed += 1;
+            }
             results.push(r);
         }
     }
 
-    HttpResponse::Ok().json(BatchModernizeResponse { total, succeeded, failed, results })
+    HttpResponse::Ok().json(BatchModernizeResponse {
+        total,
+        succeeded,
+        failed,
+        results,
+    })
 }
 
 async fn health(state: web::Data<AppState>) -> HttpResponse {
-    let s3_ok = state.http_client
-        .get(format!("{}/health", state.s3_mcp_url))
-        .send().await.map(|r| r.status().is_success()).unwrap_or(false);
-    let cobol_ok = state.http_client
-        .get(format!("{}/health", state.cobol_mcp_url))
-        .send().await.map(|r| r.status().is_success()).unwrap_or(false);
-    let purple_ok = state.http_client
-        .get(format!("{}/health", state.purple_agent_url))
-        .send().await.map(|r| r.status().is_success()).unwrap_or(false);
-    let all_ok = s3_ok && cobol_ok && purple_ok;
+    let timeout = std::time::Duration::from_secs(2);
 
+    let s3_ok = tokio::time::timeout(
+        timeout,
+        state
+            .http_client
+            .get(format!("{}/health", state.s3_mcp_url))
+            .send(),
+    )
+    .await
+    .ok()
+    .and_then(|r| r.ok())
+    .map(|r| r.status().is_success())
+    .unwrap_or(false);
+
+    let cobol_ok = tokio::time::timeout(
+        timeout,
+        state
+            .http_client
+            .get(format!("{}/health", state.cobol_mcp_url))
+            .send(),
+    )
+    .await
+    .ok()
+    .and_then(|r| r.ok())
+    .map(|r| r.status().is_success())
+    .unwrap_or(false);
+
+    let purple_ok = tokio::time::timeout(
+        timeout,
+        state
+            .http_client
+            .get(format!("{}/health", state.purple_agent_url))
+            .send(),
+    )
+    .await
+    .ok()
+    .and_then(|r| r.ok())
+    .map(|r| r.status().is_success())
+    .unwrap_or(false);
+
+    let all_ok = s3_ok && cobol_ok && purple_ok;
     let body = serde_json::json!({
         "status": if all_ok { "healthy" } else { "degraded" },
         "agent": "green_agent",
@@ -544,9 +668,7 @@ async fn health(state: web::Data<AppState>) -> HttpResponse {
         "s3_bucket": state.s3_bucket,
         "fba_paper": "arxiv:2507.11768"
     });
-
-    if all_ok { HttpResponse::Ok().json(body) }
-    else { HttpResponse::ServiceUnavailable().json(body) }
+    HttpResponse::Ok().json(body)
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -555,11 +677,12 @@ async fn health(state: web::Data<AppState>) -> HttpResponse {
 async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
-    let s3_mcp_url       = std::env::var("S3_MCP_URL").unwrap_or(DEFAULT_S3_MCP_URL.to_string());
-    let cobol_mcp_url    = std::env::var("COBOL_MCP_URL").unwrap_or(DEFAULT_COBOL_MCP_URL.to_string());
-    let purple_agent_url = std::env::var("PURPLE_AGENT_URL").unwrap_or(DEFAULT_PURPLE_AGENT_URL.to_string());
-    let s3_bucket        = std::env::var("S3_BUCKET").unwrap_or(S3_BUCKET.to_string());
-    let bind_addr        = std::env::var("BIND_ADDR").unwrap_or(DEFAULT_PORT.to_string());
+    let s3_mcp_url = std::env::var("S3_MCP_URL").unwrap_or(DEFAULT_S3_MCP_URL.to_string());
+    let cobol_mcp_url = std::env::var("COBOL_MCP_URL").unwrap_or(DEFAULT_COBOL_MCP_URL.to_string());
+    let purple_agent_url =
+        std::env::var("PURPLE_AGENT_URL").unwrap_or(DEFAULT_PURPLE_AGENT_URL.to_string());
+    let s3_bucket = std::env::var("S3_BUCKET").unwrap_or(S3_BUCKET.to_string());
+    let bind_addr = std::env::var("BIND_ADDR").unwrap_or(DEFAULT_PORT.to_string());
 
     info!("🟢 Green Agent v2.1 starting on {}", bind_addr);
     info!("   s3_mcp:       {}", s3_mcp_url);
@@ -574,16 +697,20 @@ async fn main() -> std::io::Result<()> {
         .expect("Failed to build HTTP client");
 
     let state = web::Data::new(AppState {
-        http_client, s3_mcp_url, cobol_mcp_url, purple_agent_url, s3_bucket,
+        http_client,
+        s3_mcp_url,
+        cobol_mcp_url,
+        purple_agent_url,
+        s3_bucket,
     });
 
     HttpServer::new(move || {
         App::new()
             .app_data(state.clone())
             .wrap(middleware::Logger::default())
-            .route("/modernize",       web::post().to(modernize))
+            .route("/modernize", web::post().to(modernize))
             .route("/modernize_batch", web::post().to(modernize_batch))
-            .route("/health",          web::get().to(health))
+            .route("/health", web::get().to(health))
     })
     .bind(&bind_addr)?
     .run()

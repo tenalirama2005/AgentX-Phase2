@@ -9,16 +9,15 @@
 /// Provider routing:
 ///   provider="anthropic" → api.anthropic.com  (Claude Opus 4.6)
 ///   provider="nebius"    → api.tokenfactory.nebius.com  (all 30 others)
-
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 use crate::fba::FbaNode;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const NEBIUS_API_URL: &str  = "https://api.tokenfactory.nebius.com/v1/chat/completions";
+const NEBIUS_API_URL: &str = "https://api.tokenfactory.nebius.com/v1/chat/completions";
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
@@ -26,29 +25,29 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModelConfig {
-    pub node_id:          String,
-    pub model_name:       String,
-    pub provider:         String,   // "anthropic" | "nebius"
-    pub model_id:         String,   // exact API model string
+    pub node_id: String,
+    pub model_name: String,
+    pub provider: String, // "anthropic" | "nebius"
+    pub model_id: String, // exact API model string
     pub pass2_max_tokens: u32,
-    pub temperature:      f64,
-    pub family:           String,
-    pub tier:             String,
+    pub temperature: f64,
+    pub family: String,
+    pub tier: String,
 }
 
 // ─── Nebius / OpenAI-compatible types ─────────────────────────────────────────
 
 #[derive(Serialize, Clone)]
 struct ChatMessage {
-    role:    String,
+    role: String,
     content: String,
 }
 
 #[derive(Serialize)]
 struct ChatRequest {
-    model:       String,
-    messages:    Vec<ChatMessage>,
-    max_tokens:  u32,
+    model: String,
+    messages: Vec<ChatMessage>,
+    max_tokens: u32,
     temperature: f64,
 }
 
@@ -73,7 +72,7 @@ struct ChatChoiceMessage {
 
 #[derive(Deserialize, Default)]
 struct ChatUsage {
-    prompt_tokens:     u32,
+    prompt_tokens: u32,
     completion_tokens: u32,
 }
 
@@ -81,16 +80,16 @@ struct ChatUsage {
 
 #[derive(Serialize)]
 struct AnthropicRequest {
-    model:       String,
-    max_tokens:  u32,
+    model: String,
+    max_tokens: u32,
     temperature: f64,
-    system:      String,
-    messages:    Vec<AnthropicMessage>,
+    system: String,
+    messages: Vec<AnthropicMessage>,
 }
 
 #[derive(Serialize, Clone)]
 struct AnthropicMessage {
-    role:    String,
+    role: String,
     content: String,
 }
 
@@ -103,7 +102,7 @@ struct AnthropicResponse {
 struct AnthropicContent {
     #[serde(rename = "type")]
     content_type: String,
-    text:         Option<String>,
+    text: Option<String>,
 }
 
 // ─── System Prompts (shared across all models) ────────────────────────────────
@@ -134,11 +133,11 @@ Output ONLY a decimal number after CONFIDENCE: with no other text on that line"
 // ─── Nebius API call (OpenAI-compatible) ──────────────────────────────────────
 
 async fn call_nebius(
-    client:      &reqwest::Client,
-    api_key:     &str,
-    model_id:    &str,
-    messages:    Vec<ChatMessage>,
-    max_tokens:  u32,
+    client: &reqwest::Client,
+    api_key: &str,
+    model_id: &str,
+    messages: Vec<ChatMessage>,
+    max_tokens: u32,
     temperature: f64,
 ) -> Result<String> {
     let body = ChatRequest {
@@ -161,7 +160,12 @@ async fn call_nebius(
     if !status.is_success() {
         let text = response.text().await.unwrap_or_default();
         error!("Nebius API error {}: {}", status, text);
-        return Err(anyhow!("Nebius API {} for model {}: {}", status, model_id, text));
+        return Err(anyhow!(
+            "Nebius API {} for model {}: {}",
+            status,
+            model_id,
+            text
+        ));
     }
 
     let parsed: ChatResponse = response
@@ -179,7 +183,10 @@ async fn call_nebius(
     if let Some(choice) = parsed.choices.first() {
         if let Some(reason) = &choice.finish_reason {
             if reason == "length" {
-                warn!("Nebius [{}] finish_reason=length — may be truncated", model_id);
+                warn!(
+                    "Nebius [{}] finish_reason=length — may be truncated",
+                    model_id
+                );
             }
         }
         Ok(choice.message.content.clone())
@@ -191,12 +198,12 @@ async fn call_nebius(
 // ─── Anthropic API call ───────────────────────────────────────────────────────
 
 async fn call_anthropic(
-    client:      &reqwest::Client,
-    api_key:     &str,
-    model_id:    &str,
-    system:      &str,
-    messages:    Vec<AnthropicMessage>,
-    max_tokens:  u32,
+    client: &reqwest::Client,
+    api_key: &str,
+    model_id: &str,
+    system: &str,
+    messages: Vec<AnthropicMessage>,
+    max_tokens: u32,
     temperature: f64,
 ) -> Result<String> {
     let body = AnthropicRequest {
@@ -247,7 +254,12 @@ pub fn extract_confidence(text: &str) -> f64 {
     for line in text.lines() {
         let lower = line.to_lowercase();
         if lower.contains("confidence:") {
-            let after = lower.split("confidence:").nth(1).unwrap_or("").trim().to_string();
+            let after = lower
+                .split("confidence:")
+                .nth(1)
+                .unwrap_or("")
+                .trim()
+                .to_string();
             let num_str: String = after
                 .chars()
                 .take_while(|c| c.is_ascii_digit() || *c == '.')
@@ -262,9 +274,16 @@ pub fn extract_confidence(text: &str) -> f64 {
     }
 
     // Strategy 2: scan for decimal like 0.92 or 0.88 near end of text
-    let last_500 = if text.len() > 500 { &text[text.len() - 500..] } else { text };
+    let last_500 = if text.len() > 500 {
+        &text[text.len() - 500..]
+    } else {
+        text
+    };
     for word in last_500.split_whitespace().rev() {
-        let clean: String = word.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
+        let clean: String = word
+            .chars()
+            .filter(|c| c.is_ascii_digit() || *c == '.')
+            .collect();
         if let Ok(v) = clean.parse::<f64>() {
             if (0.5..=1.0).contains(&v) {
                 return v;
@@ -322,12 +341,12 @@ fn extract_rust_code(text: &str) -> String {
 /// Call a single model (Nebius or Anthropic) using two-pass architecture.
 /// Returns FbaNode with rust_code, confidence, cot_steps_used.
 pub async fn call_model(
-    client:       &reqwest::Client,
-    config:       &ModelConfig,
-    nebius_key:   &str,
+    client: &reqwest::Client,
+    config: &ModelConfig,
+    nebius_key: &str,
     anthropic_key: &str,
     cobol_source: &str,
-    k_star:       usize,
+    k_star: usize,
 ) -> Result<FbaNode> {
     let effective_steps = k_star.min(20);
 
@@ -343,8 +362,7 @@ pub async fn call_model(
         effective_steps, cobol_source
     );
 
-    let pass2_user = format!(
-        "Now write the Rust translation based on your analysis above.\n\
+    let pass2_user = "Now write the Rust translation based on your analysis above.\n\
          Target length: 800-1500 chars.\n\
          Be concise — no helper functions, no extra structs, no verbose comments.\n\
          Output format:\n\n\
@@ -355,117 +373,188 @@ pub async fn call_model(
          CONFIDENCE: [decimal 0.0-1.0 only, no other text on this line]\n\
          Note: For a straightforward COBOL translation with no ambiguity, \
 confidence should be 0.90 or higher."
-    );
+        .to_string();
 
     // ── Dispatch by provider ──────────────────────────────────────────────────
     let raw_text = match config.provider.as_str() {
         "anthropic" => {
             call_anthropic_two_pass(
-                client, anthropic_key, &config.model_id,
-                &pass1_user, &pass2_user, config.pass2_max_tokens, config.temperature,
-            ).await?
+                client,
+                anthropic_key,
+                &config.model_id,
+                &pass1_user,
+                &pass2_user,
+                config.pass2_max_tokens,
+                config.temperature,
+            )
+            .await?
         }
         "nebius" => {
             call_nebius_two_pass(
-                client, nebius_key, &config.model_id,
-                &pass1_user, &pass2_user, config.pass2_max_tokens, config.temperature,
-            ).await?
+                client,
+                nebius_key,
+                &config.model_id,
+                &pass1_user,
+                &pass2_user,
+                config.pass2_max_tokens,
+                config.temperature,
+            )
+            .await?
         }
         other => return Err(anyhow!("Unknown provider: {}", other)),
     };
 
-    let rust_code  = extract_rust_code(&raw_text);
+    let rust_code = extract_rust_code(&raw_text);
     let confidence = extract_confidence(&raw_text);
 
     info!(
         "✅ [{}/{}/{}] code_len={} confidence={:.2}",
-        config.node_id, config.family, config.tier, rust_code.len(), confidence
+        config.node_id,
+        config.family,
+        config.tier,
+        rust_code.len(),
+        confidence
     );
 
     Ok(FbaNode {
-        node_id:       config.node_id.clone(),
-        model_name:    config.model_name.clone(),
+        node_id: config.node_id.clone(),
+        model_name: config.model_name.clone(),
         rust_code,
         confidence,
         cot_steps_used: effective_steps,
-        raw_response:  raw_text,
+        raw_response: raw_text,
     })
 }
 
 // ─── Two-Pass: Nebius ─────────────────────────────────────────────────────────
 
 async fn call_nebius_two_pass(
-    client:      &reqwest::Client,
-    api_key:     &str,
-    model_id:    &str,
-    pass1_user:  &str,
-    pass2_user:  &str,
-    pass2_max:   u32,
+    client: &reqwest::Client,
+    api_key: &str,
+    model_id: &str,
+    pass1_user: &str,
+    pass2_user: &str,
+    pass2_max: u32,
     temperature: f64,
 ) -> Result<String> {
     // Pass 1 — reasoning only
     let p1_messages = vec![
-        ChatMessage { role: "system".into(), content: reasoning_system_prompt().into() },
-        ChatMessage { role: "user".into(),   content: pass1_user.into() },
+        ChatMessage {
+            role: "system".into(),
+            content: reasoning_system_prompt().into(),
+        },
+        ChatMessage {
+            role: "user".into(),
+            content: pass1_user.into(),
+        },
     ];
 
     info!("  [{model_id}] Pass 1: reasoning (max_tokens=1024)");
     let reasoning = call_nebius(client, api_key, model_id, p1_messages, 1024, temperature)
         .await
         .unwrap_or_else(|e| {
-            warn!("  [{model_id}] Pass 1 failed: {} — using empty reasoning", e);
+            warn!(
+                "  [{model_id}] Pass 1 failed: {} — using empty reasoning",
+                e
+            );
             String::new()
         });
 
     // Pass 2 — code generation, inject reasoning as assistant turn
     let p2_messages = vec![
-        ChatMessage { role: "system".into(),    content: codegen_system_prompt().into() },
-        ChatMessage { role: "user".into(),       content: pass1_user.into() },
-        ChatMessage { role: "assistant".into(),  content: reasoning.clone() },
-        ChatMessage { role: "user".into(),       content: pass2_user.into() },
+        ChatMessage {
+            role: "system".into(),
+            content: codegen_system_prompt().into(),
+        },
+        ChatMessage {
+            role: "user".into(),
+            content: pass1_user.into(),
+        },
+        ChatMessage {
+            role: "assistant".into(),
+            content: reasoning.clone(),
+        },
+        ChatMessage {
+            role: "user".into(),
+            content: pass2_user.into(),
+        },
     ];
 
     info!("  [{model_id}] Pass 2: codegen (max_tokens={pass2_max})");
-    call_nebius(client, api_key, model_id, p2_messages, pass2_max, temperature).await
+    call_nebius(
+        client,
+        api_key,
+        model_id,
+        p2_messages,
+        pass2_max,
+        temperature,
+    )
+    .await
 }
 
 // ─── Two-Pass: Anthropic ──────────────────────────────────────────────────────
 
 async fn call_anthropic_two_pass(
-    client:      &reqwest::Client,
-    api_key:     &str,
-    model_id:    &str,
-    pass1_user:  &str,
-    pass2_user:  &str,
-    pass2_max:   u32,
+    client: &reqwest::Client,
+    api_key: &str,
+    model_id: &str,
+    pass1_user: &str,
+    pass2_user: &str,
+    pass2_max: u32,
     temperature: f64,
 ) -> Result<String> {
     // Pass 1 — reasoning only
-    let p1_messages = vec![
-        AnthropicMessage { role: "user".into(), content: pass1_user.into() },
-    ];
+    let p1_messages = vec![AnthropicMessage {
+        role: "user".into(),
+        content: pass1_user.into(),
+    }];
 
     info!("  [{model_id}] Pass 1: reasoning (max_tokens=1024)");
     let reasoning = call_anthropic(
-        client, api_key, model_id,
-        reasoning_system_prompt(), p1_messages, 1024, temperature,
-    ).await.unwrap_or_else(|e| {
-        warn!("  [{model_id}] Pass 1 failed: {} — using empty reasoning", e);
+        client,
+        api_key,
+        model_id,
+        reasoning_system_prompt(),
+        p1_messages,
+        1024,
+        temperature,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        warn!(
+            "  [{model_id}] Pass 1 failed: {} — using empty reasoning",
+            e
+        );
         String::new()
     });
 
     // Pass 2 — inject reasoning as assistant turn
     let p2_messages = vec![
-        AnthropicMessage { role: "user".into(),      content: pass1_user.into() },
-        AnthropicMessage { role: "assistant".into(), content: reasoning.clone() },
-        AnthropicMessage { role: "user".into(),      content: pass2_user.into() },
+        AnthropicMessage {
+            role: "user".into(),
+            content: pass1_user.into(),
+        },
+        AnthropicMessage {
+            role: "assistant".into(),
+            content: reasoning.clone(),
+        },
+        AnthropicMessage {
+            role: "user".into(),
+            content: pass2_user.into(),
+        },
     ];
 
     info!("  [{model_id}] Pass 2: codegen (max_tokens={pass2_max})");
     call_anthropic(
-        client, api_key, model_id,
-        codegen_system_prompt(), p2_messages, pass2_max, temperature,
-    ).await
+        client,
+        api_key,
+        model_id,
+        codegen_system_prompt(),
+        p2_messages,
+        pass2_max,
+        temperature,
+    )
+    .await
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

@@ -7,13 +7,96 @@
 //   POST /generate_presigned_url - Generate pre-signed URL for download
 //   POST /list_objects       - List objects in bucket/prefix
 
+use actix_web::body::EitherBody;
+use actix_web::dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform};
+use actix_web::Error;
 use actix_web::{middleware, web, App, HttpResponse, HttpServer};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::Client;
+use futures_util::future::LocalBoxFuture;
 use log::{error, info};
 use serde::{Deserialize, Serialize};
+use std::future::{ready, Ready};
 use std::time::Duration;
+
+// ─── Gateway Auth Middleware ──────────────────────────────────────────────────
+
+pub struct GatewayAuth;
+
+impl<S, B> Transform<S, ServiceRequest> for GatewayAuth
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
+    S::Future: 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<EitherBody<B>>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = GatewayAuthMiddleware<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(GatewayAuthMiddleware { service }))
+    }
+}
+
+pub struct GatewayAuthMiddleware<S> {
+    service: S,
+}
+
+impl<S, B> Service<ServiceRequest> for GatewayAuthMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
+    S::Future: 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<EitherBody<B>>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    forward_ready!(service);
+
+    fn call(&self, req: ServiceRequest) -> Self::Future {
+        let path = req.path().to_string();
+
+        if path == "/health" {
+            let fut = self.service.call(req);
+            return Box::pin(async move {
+                let res = fut.await?;
+                Ok(res.map_into_left_body())
+            });
+        }
+
+        let gateway_token = std::env::var("GATEWAY_INTERNAL_TOKEN")
+            .unwrap_or_else(|_| "agentx-internal-token".to_string());
+
+        let has_token = req
+            .headers()
+            .get("X-AgentGateway-Token")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v == gateway_token)
+            .unwrap_or(false);
+
+        if !has_token {
+            info!("Blocked direct access to {} - missing gateway token", path);
+            let (req, _) = req.into_parts();
+            let response = HttpResponse::Forbidden().json(serde_json::json!({
+                "success": false,
+                "error": "Direct access denied. All MCP calls must route through AgentGateway."
+            }));
+            return Box::pin(async move {
+                Ok(ServiceResponse::new(req, response).map_into_right_body())
+            });
+        }
+
+        let fut = self.service.call(req);
+        Box::pin(async move {
+            let res = fut.await?;
+            Ok(res.map_into_left_body())
+        })
+    }
+}
 
 // ─── Request/Response Types ───────────────────────────────────────────────────
 
@@ -290,6 +373,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(state.clone())
             .wrap(middleware::Logger::default())
+            .wrap(GatewayAuth)
             .route("/fetch_source", web::post().to(fetch_source))
             .route("/fetch_data", web::post().to(fetch_data))
             .route("/save_output", web::post().to(save_output))

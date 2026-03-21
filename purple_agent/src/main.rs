@@ -35,23 +35,23 @@ pub struct ReviewRequest {
 /// Matches green_agent's FbaNodeResult exactly
 #[derive(Debug, Serialize)]
 pub struct NodeSummary {
-    pub node_id:        String,
-    pub model_name:     String,
-    pub rust_code:      String,
-    pub confidence:     f64,
+    pub node_id: String,
+    pub model_name: String,
+    pub rust_code: String,
+    pub confidence: f64,
     pub cot_steps_used: usize,
 }
 
 /// Matches green_agent's PurpleAgentResponse
 #[derive(Debug, Serialize)]
 pub struct ReviewResponse {
-    pub status: String,                  // fba.status
-    pub rust_code: Option<String>,       // fba.rust_code
-    pub confidence: f64,                 // fba.fba_confidence / fba.confidence
-    pub bayesian_guarantee: String,      // fba.bayesian_guarantee
-    pub k_star: usize,                   // fba.k_star
+    pub status: String,             // fba.status
+    pub rust_code: Option<String>,  // fba.rust_code
+    pub confidence: f64,            // fba.fba_confidence / fba.confidence
+    pub bayesian_guarantee: String, // fba.bayesian_guarantee
+    pub k_star: usize,              // fba.k_star
     pub semantic_similarity: f64,
-    pub node_results: Vec<NodeSummary>,  // fba.node_results
+    pub node_results: Vec<NodeSummary>, // fba.node_results
     pub paper_reference: String,
 }
 
@@ -76,10 +76,10 @@ async fn review_handler(
         .node_results
         .iter()
         .map(|n| NodeSummary {
-            node_id:        n.node_id.clone(),
-            model_name:     n.model_name.clone(),
-            rust_code:      n.rust_code.clone(),
-            confidence:     n.confidence,
+            node_id: n.node_id.clone(),
+            model_name: n.model_name.clone(),
+            rust_code: n.rust_code.clone(),
+            confidence: n.confidence,
             cot_steps_used: n.cot_steps_used,
         })
         .collect();
@@ -135,15 +135,18 @@ async fn main() -> std::io::Result<()> {
 
     let config = ConsensusConfig::from_toml("models.toml").map_err(|e| {
         error!("Failed to load models.toml: {e}");
-        std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+        std::io::Error::other(e.to_string())
     })?;
 
-    info!(node_count = config.models.len(), "Loaded ConsensusConfig from models.toml");
+    info!(
+        node_count = config.models.len(),
+        "Loaded ConsensusConfig from models.toml"
+    );
 
     let nebius_key = std::env::var("NEBIUS_API_KEY")
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "NEBIUS_API_KEY not set"))?;
+        .map_err(|_| std::io::Error::other("NEBIUS_API_KEY not set"))?;
     let anthropic_key = std::env::var("ANTHROPIC_API_KEY")
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "ANTHROPIC_API_KEY not set"))?;
+        .map_err(|_| std::io::Error::other("ANTHROPIC_API_KEY not set"))?;
 
     let http_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3600))
@@ -165,9 +168,9 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(state.clone())
-            .route("/modernize", web::post().to(review_handler))  // green_agent calls this
-            .route("/review",   web::post().to(review_handler))   // alias
-            .route("/health",   web::get().to(health_handler))
+            .route("/modernize", web::post().to(review_handler)) // green_agent calls this
+            .route("/review", web::post().to(review_handler)) // alias
+            .route("/health", web::get().to(health_handler))
     })
     .keep_alive(std::time::Duration::from_secs(3600))
     .client_request_timeout(std::time::Duration::from_secs(3600))
