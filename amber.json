@@ -1,0 +1,13 @@
+{
+  "name": "purple_agent",
+  "version": "0.4.0",
+  "description": "FBA 31-node consensus engine for COBOL to Rust modernization",
+  "endpoint": "https://chasmic-ungraven-christene.ngrok-free.dev",
+  "capabilities": ["code_modernization", "fba_consensus", "cobol_to_rust"],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "s3_key": {"type": "string", "description": "S3 key of COBOL source file"}
+    }
+  }
+}
