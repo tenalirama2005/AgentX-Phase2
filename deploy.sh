@@ -134,10 +134,39 @@ if [ "$RUN_PIPELINE" = true ]; then
     yellow "  Running: programs/interest_calc.cbl -> Rust"
     yellow "  Thirty One AI models voting in parallel..."
     echo ""
+    
+    # Verify credentials are set
+    cyan "  Verifying credentials..."
+    NEBIUS_CHECK=$(kubectl exec -n $NAMESPACE \
+      $(kubectl get pod -n $NAMESPACE -l app=purple-agent -o jsonpath='{.items[0].metadata.name}') \
+      -c purple-agent -- env 2>/dev/null | grep "^NEBIUS_API_KEY=" | cut -d'=' -f2-)
+    AWS_CHECK=$(kubectl exec -n $NAMESPACE \
+      $(kubectl get pod -n $NAMESPACE -l app=s3-mcp -o jsonpath='{.items[0].metadata.name}') \
+      -c s3-mcp -- env 2>/dev/null | grep "^AWS_ACCESS_KEY_ID=" | cut -d'=' -f2-)
+    
+    if [ -z "$NEBIUS_CHECK" ]; then
+        red "  ERROR: NEBIUS_API_KEY is empty in purple-agent pod!"
+        red "  Run: kubectl delete secret purple-agent-credentials -n $NAMESPACE"
+        red "  Then re-inject with correct values from .env"
+        exit 1
+    fi
+    if [ -z "$AWS_CHECK" ]; then
+        red "  ERROR: AWS_ACCESS_KEY_ID is empty in s3-mcp pod!"
+        red "  Run: kubectl delete secret s3-mcp-credentials -n $NAMESPACE"
+        red "  Then re-inject with correct values from .env"
+        exit 1
+    fi
+    green "  Credentials verified ✓"
 
     PR=$(curl -s -X POST http://localhost:8080/modernize \
         -H "Content-Type: application/json" \
         -d '{"s3_key":"programs/interest_calc.cbl"}')
+
+    if [ -z "$PR" ]; then
+        red "  ERROR: No response from green-agent. Check port-forward."
+        red "  Run: kubectl port-forward svc/green-agent 8080:8080 -n mainframe-modernization &"
+        exit 1
+    fi
 
     FBA_STATUS=$(echo $PR | python3 -c "import sys,json; print(json.load(sys.stdin).get('fba_status',''))")
     CONFIDENCE=$(echo $PR | python3 -c "import sys,json; print(json.load(sys.stdin).get('fba_confidence',''))")
@@ -146,48 +175,54 @@ if [ "$RUN_PIPELINE" = true ]; then
     GUARANTEE=$(echo $PR | python3 -c "import sys,json; print(json.load(sys.stdin).get('bayesian_guarantee',''))")
     REVIEW=$(echo $PR | python3 -c "import sys,json; print(json.load(sys.stdin).get('review_folder',''))")
     S3_OUT=$(echo $PR | python3 -c "import sys,json; print(json.load(sys.stdin).get('s3_output_key',''))")
+    ERROR=$(echo $PR | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error') or '')")
+    STATUS_MSG=$(echo $PR | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status') or '')")
+
+    # Check for pipeline errors
+    if [ -z "$FBA_STATUS" ] || [ "$FBA_STATUS" = "None" ]; then
+        red "  Pipeline failed: $STATUS_MSG"
+        red "  Error: $ERROR"
+        red ""
+        red "  Common fixes:"
+        red "  1. kubectl rollout restart deployment -n mainframe-modernization"
+        red "  2. kubectl apply -f k8s/base/07-istio-network-policy.yaml"
+        red "  3. Restart port-forwards"
+        exit 1
+    fi
 
 # Fetch per-node FBA report
-if [ -n "$REVIEW" ]; then
-   REPORT_BODY="{\"bucket\":\"$S3_BUCKET\",\"key\":\"$REVIEW/fba_report/fba_report.json\"}"
-   REPORT=$(curl -s --max-time 30 -X POST http://localhost:8082/fetch_source \
-       -H "Content-Type: application/json" \
-       -H "X-AgentGateway-Token: agentx-internal-token" \
-       -d "$REPORT_BODY")
+    if [ -n "$REVIEW" ]; then
+        REPORT_BODY="{\"bucket\":\"$S3_BUCKET\",\"key\":\"$REVIEW/fba_report/fba_report.json\"}"
+        REPORT=$(curl -s --max-time 30 -X POST http://localhost:8082/fetch_source \
+            -H "Content-Type: application/json" \
+            -H "X-AgentGateway-Token: agentx-internal-token" \
+            -d "$REPORT_BODY")
 
-   echo ""
-   cyan "================================================="
-   cyan " FBA Node Results -- Thirty One Models     arxiv:2507.11768"
-   cyan "================================================="
+        echo ""
+        cyan "================================================="
+        cyan " FBA Node Results -- Thirty One Models     arxiv:2507.11768"
+        cyan "================================================="
 
-   echo $REPORT | python3 -c "
+        echo $REPORT | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 content = json.loads(d.get('content','{}'))
 nodes = sorted(content.get('nodes',[]), key=lambda x: x.get('confidence',0), reverse=True)
 print('')
-print('  Model                            Conf  Bar')
-print('  ' + '-'*55)
+print('  {:<30} {:>4}  {:<25} {}'.format('Model', 'Conf', 'Bar (25 chars = 100%)', 'Status'))
+print('  ' + '='*68)
 for i, n in enumerate(nodes, 1):
-   conf = n.get('confidence', 0)
-   pct = int(conf * 100)
-   bar_len = int(conf * 25)
-   empty_len = 25 - bar_len
-   if conf >= 0.85:
-        color = '\033[0;33m'
-        icon = '[OK]'
-   elif conf >= 0.70:
-        color = '\033[0;34m'
-        icon = '[WARN]'
-   else:
-        color = '\033[0;31m'
-        icon = '[LOW]'
-   reset = '\033[0m'
-   bar = color + chr(9608) * bar_len + reset + chr(9617) * empty_len
-   print(f'  [{i:02d}] {n[\"node_id\"]:<28} {pct:3d}%  |{bar}| {icon}')
-print('  ' + '-'*55)
-"
-    fi
+    conf = n.get('confidence', 0)
+    pct = int(conf * 100)
+    bar_len = int(conf * 25)
+    empty_len = 25 - bar_len
+    icon = 'OK  ' if conf >= 0.85 else 'WARN' if conf >= 0.70 else 'LOW '
+    bar = '#' * bar_len + '.' * empty_len
+    print('  [{:02d}] {:<28} {:3d}%  [{}] {}'.format(
+        i, n['node_id'][:28], pct, bar, icon))
+print('  ' + '='*68)
+" 2>/dev/null || echo "  (FBA report display unavailable)"
+    fi    
 
     echo ""
     cyan "================================================="
@@ -199,22 +234,25 @@ print('  ' + '-'*55)
     cyan "             Fixed for interest_calc.cbl — changes only if COBOL input changes"
     green "  Guarantee : $GUARANTEE"
     yellow "  Paper     : arxiv:2507.11768"
-    echo "  S3 Output : $S3_OUT"
-    PRESIGNED=$(echo $PR | python3 -c "import sys,json; print(json.load(sys.stdin).get('presigned_url',''))")
-    if [ -n "$PRESIGNED" ]; then
-        cyan "  Download  : (pre-signed URL valid 1 hour)"
-        echo "  $PRESIGNED"
+    if [ -n "$S3_OUT" ] && [ "$S3_OUT" != "None" ]; then
+        echo "  S3 Output : $S3_OUT"
+        PRESIGNED=$(echo $PR | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('presigned_url') or '')")
+        if [ -n "$PRESIGNED" ] && [ "$PRESIGNED" != "None" ]; then
+            cyan "  Download  : (pre-signed URL valid 1 hour)"
+            echo "  $PRESIGNED"
+        fi
     fi
-    if [ -n "$REVIEW" ]; then
-        # Generate presigned URL for FBA report
+    if [ -n "$REVIEW" ] && [ "$REVIEW" != "None" ]; then
         FBA_REPORT_URL=$(curl -s --max-time 10 \
             -X POST http://localhost:8082/generate_presigned_url \
             -H "Content-Type: application/json" \
             -H "X-AgentGateway-Token: agentx-internal-token" \
             -d "{\"bucket\":\"$S3_BUCKET\",\"key\":\"$REVIEW/fba_report/fba_report.json\"}" | \
-            python3 -c "import sys,json; print(json.load(sys.stdin).get('presigned_url',''))")
-        cyan "  FBA Report: (pre-signed URL valid 1 hour)"
-        echo "  $FBA_REPORT_URL"
+            python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('presigned_url') or '')")
+        if [ -n "$FBA_REPORT_URL" ] && [ "$FBA_REPORT_URL" != "None" ]; then
+            cyan "  FBA Report: (pre-signed URL valid 1 hour)"
+            echo "  $FBA_REPORT_URL"
+        fi
         cyan "  Per-node  : $REVIEW/<model_name>/interest_calc.rs"
     fi
     cyan "================================================="
@@ -390,20 +428,13 @@ else
 fi
 
 # Strip Windows carriage returns from all credentials
-ANTH=$(echo "${ANTHROPIC_API_KEY:-}" | tr -d '
-')
-AKID=$(echo "${AWS_ACCESS_KEY_ID:-}" | tr -d '
-')
-ASEC=$(echo "${AWS_SECRET_ACCESS_KEY:-}" | tr -d '
-')
-NEBIUS=$(echo "${NEBIUS_API_KEY:-}" | tr -d '
-')
-GREEN_KEY=$(echo "${GREEN_AGENT_API_KEY:-green-agent-dev-key}" | tr -d '
-')
-PURP_KEY=$(echo "${PURPLE_AGENT_API_KEY:-purple-agent-dev-key}" | tr -d '
-')
-JWT=$(echo "${GATEWAY_JWT_SECRET:-$(cat /proc/sys/kernel/random/uuid | tr -d '-')$(cat /proc/sys/kernel/random/uuid | tr -d '-')}" | tr -d '
-')
+ANTH=$(grep "^ANTHROPIC_API_KEY" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')
+AKID=$(grep "^AWS_ACCESS_KEY_ID" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')
+ASEC=$(grep "^AWS_SECRET_ACCESS_KEY" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')
+NEBIUS=$(grep "^NEBIUS_API_KEY" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')
+GREEN_KEY=$(grep "^GREEN_AGENT_API_KEY" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')
+PURP_KEY=$(grep "^PURPLE_AGENT_API_KEY" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')
+JWT=$(grep "^GATEWAY_JWT_SECRET" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')
 
 [ -z "$ANTH" ]   && yellow "  WARNING: ANTHROPIC_API_KEY not set"
 [ -z "$AKID" ]   && yellow "  WARNING: AWS_ACCESS_KEY_ID not set"
@@ -440,28 +471,44 @@ inject_secret "ai-mcp-credentials"       --from-literal=claude-api-key="$ANTH" \
 cyan "\n[6/7] Applying Kubernetes manifests"
 
 MANIFESTS=("00-namespace-rbac.yaml" "02-agent-gateway.yaml" "03-agents.yaml" \
-           "04-network-policy.yaml" "05-mcp-servers.yaml")
+           "04-network-policy.yaml" "05-mcp-servers.yaml" \
+           "06-istio-authpolicy.yaml" "07-istio-network-policy.yaml")
 
 for m in "${MANIFESTS[@]}"; do
     PATH_M="$K8S_DIR/$m"
     if [ ! -f "$PATH_M" ]; then red "  Missing: $PATH_M"; exit 1; fi
-    kubectl apply -f "$PATH_M" -n $NAMESPACE > /dev/null
-    green "  $m applied"
+    kubectl apply -f "$PATH_M" -n $NAMESPACE > /dev/null 2>&1 && \
+        green "  $m applied" || \
+        yellow "  $m skipped (Istio CRDs not ready)"
 done
+# Ensure Istio sidecar injection is enabled
+kubectl label namespace $NAMESPACE istio-injection=enabled --overwrite > /dev/null
+green "  Istio sidecar injection enabled"
+
+yellow "  Restarting deployments to inject Istio sidecars..."
+kubectl delete pods -n $NAMESPACE --all --force --grace-period=0 > /dev/null 2>&1
+green "  Pods restarted with Istio sidecars"
 
 yellow "  Restarting deployments to pick up secrets..."
 kubectl rollout restart deployment -n $NAMESPACE > /dev/null
 
 # ── [7/7] Wait for rollout ───────────────────────────────────
-cyan "\n[7/7] Waiting for deployments to be ready"
+cyan "\n[7/7] Waiting for deployments to be ready (2/2 with Istio sidecars)"
 yellow "  First run: 3-5 min (Docker Hub pull)"
-yellow "  Subsequent runs: ~30s (kind registry cache)"
+yellow "  Subsequent runs: ~90s"
 
+sleep 30
 for d in agent-gateway s3-mcp cobol-mcp ai-mcp rust-mcp purple-agent green-agent; do
     yellow "  Waiting: $d..."
     kubectl rollout status deployment/$d -n $NAMESPACE --timeout=300s
     green "  $d: Ready"
 done
+
+# Verify Istio sidecars
+READY=$(kubectl get pods -n $NAMESPACE --no-headers | grep "2/2" | wc -l)
+TOTAL=$(kubectl get pods -n $NAMESPACE --no-headers | wc -l)
+green "  Istio sidecars: $READY/$TOTAL pods showing 2/2"
+kubectl get pods -n $NAMESPACE
 
 # ── Port-forwards ─────────────────────────────────────────────
 cyan "\n=== Setting up port-forwards ==="

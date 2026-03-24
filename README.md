@@ -2,6 +2,7 @@
 ### FBA 31-Node Consensus | Zero-Trust Security | Kubernetes + Istio + Kiali
 **AgentX - AgentBeats Competition | Phase 2 Sprint 1 | Business Process Agent Track**
 
+[![CI](https://github.com/tenalirama2005/AgentX-Phase2/actions/workflows/agentx-deploy.yml/badge.svg)](https://github.com/tenalirama2005/AgentX-Phase2/actions/workflows/agentx-deploy.yml)
 [![Cilium](https://img.shields.io/badge/Cilium-Isovalent-orange)](https://www.credly.com/badges/40ec4b44-6e12-4aba-9512-31303e4d0733)
 [![Solo.io](https://img.shields.io/badge/Solo.io-Velocity-blue)](https://www.credly.com/earner/earned/badge/dd16b89b-f8b8-4dae-9800-2bf3429b1a3e)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.35-blue)](https://kubernetes.io)
