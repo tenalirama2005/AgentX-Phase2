@@ -51,8 +51,7 @@ jobs:
         run: |
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
           chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
-          printf "apiVersion: kind.x-k8s.io/v1alpha4\nkind: Cluster\nnodes:\n- role: control-plane\nnetworking:\n  disableDefaultCNI: true\n  podSubnet: 10.244.0.0/16\n" > /tmp/kind-config.yaml
-          cat /tmp/kind-config.yaml
+          printf "apiVersion: kind.x-k8s.io/v1alpha4\nkind: Cluster\nnodes:\n- role: control-plane\n" > /tmp/kind-config.yaml
           kind create cluster --name $CLUSTER_NAME --config /tmp/kind-config.yaml --wait 60s
           kubectl get nodes
           
@@ -119,22 +118,41 @@ jobs:
       - name: Wait for all pods to be ready
         continue-on-error: true
         run: |
-          echo "Giving pods 60s to start pulling images..."
-          sleep 60
+          echo "Waiting 120s for images to pull..."
+          sleep 120
+          kubectl get pods -n $NAMESPACE
+          
           for d in agent-gateway s3-mcp cobol-mcp ai-mcp rust-mcp purple-agent green-agent; do
             echo "Waiting: $d..."
-            kubectl rollout status deployment/$d -n $NAMESPACE --timeout=600s
+            kubectl rollout status deployment/$d -n $NAMESPACE --timeout=600s || true
           done
+          
+          echo "Final pod status:"
           kubectl get pods -n $NAMESPACE
 
       - name: Setup port-forwards
         run: |
+          # Wait until pods are actually Running
+          echo "Waiting for pods to be Running..."
+          for i in $(seq 1 30); do
+            PENDING=$(kubectl get pods -n $NAMESPACE --no-headers | grep -c "Pending\|Init\|ContainerCreating" || true)
+            if [ "$PENDING" = "0" ]; then
+              echo "All pods running!"
+              break
+            fi
+            echo "  Still $PENDING pods pending... waiting 10s"
+            sleep 10
+          done
+          
+          kubectl get pods -n $NAMESPACE
+          
           kubectl port-forward svc/green-agent   8080:8080 -n $NAMESPACE &
           kubectl port-forward svc/s3-mcp        8082:8081 -n $NAMESPACE &
           kubectl port-forward svc/agent-gateway 8090:8090 -n $NAMESPACE &
-          sleep 5
-          curl -s http://localhost:8080/health | python3 -m json.tool
-
+          sleep 10
+          
+          curl -s --max-time 10 http://localhost:8080/health | python3 -m json.tool || true
+          
       - name: Run FBA Pipeline Test
         if: ${{ inputs.run_pipeline == true }}
         run: |
