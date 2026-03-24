@@ -75,6 +75,66 @@ security, backed by **Istio service mesh** with **Kiali** visual proof.
 git clone https://github.com/tenalirama2005/AgentX-Phase2
 cd AgentX-Phase2
 
+## Before Every Run — Verify Credentials
+
+Before running `./deploy.sh --run-pipeline`, always verify your credentials 
+are correctly injected into the cluster:
+```bash
+# Verify AWS credentials in s3-mcp pod
+kubectl exec -n mainframe-modernization \
+  $(kubectl get pod -n mainframe-modernization -l app=s3-mcp -o jsonpath='{.items[0].metadata.name}') \
+  -c s3-mcp -- env | grep -E "AWS_ACCESS_KEY_ID|AWS_SECRET|AWS_REGION"
+
+# Verify Nebius + Anthropic credentials in purple-agent pod  
+kubectl exec -n mainframe-modernization \
+  $(kubectl get pod -n mainframe-modernization -l app=purple-agent -o jsonpath='{.items[0].metadata.name}') \
+  -c purple-agent -- env | grep -E "NEBIUS|ANTHROPIC|CLAUDE"
+```
+
+If any values are empty, re-inject secrets:
+```bash
+ANTH=$(grep "^ANTHROPIC_API_KEY" .env | cut -d'=' -f2- | tr -d '\r\n')
+AKID=$(grep "^AWS_ACCESS_KEY_ID" .env | cut -d'=' -f2- | tr -d '\r\n')
+ASEC=$(grep "^AWS_SECRET_ACCESS_KEY" .env | cut -d'=' -f2- | tr -d '\r\n')
+NEBIUS=$(grep "^NEBIUS_API_KEY" .env | cut -d'=' -f2- | tr -d '\r\n')
+PURP_KEY=$(grep "^PURPLE_AGENT_API_KEY" .env | cut -d'=' -f2- | tr -d '\r\n')
+GREEN_KEY=$(grep "^GREEN_AGENT_API_KEY" .env | cut -d'=' -f2- | tr -d '\r\n')
+
+echo "AWS    : ${AKID:0:8}..."
+echo "Nebius : ${NEBIUS:0:10}..."
+echo "Anthropic: ${ANTH:0:10}..."
+
+kubectl delete secret s3-mcp-credentials purple-agent-credentials \
+  green-agent-credentials ai-mcp-credentials -n mainframe-modernization
+
+kubectl create secret generic s3-mcp-credentials \
+  -n mainframe-modernization \
+  --from-literal=aws-access-key-id="$AKID" \
+  --from-literal=aws-secret-access-key="$ASEC" \
+  --from-literal=aws-region="us-east-1"
+
+kubectl create secret generic purple-agent-credentials \
+  -n mainframe-modernization \
+  --from-literal=api-key="$PURP_KEY" \
+  --from-literal=anthropic-api-key="$ANTH" \
+  --from-literal=nebius-api-key="$NEBIUS"
+
+kubectl create secret generic green-agent-credentials \
+  -n mainframe-modernization \
+  --from-literal=api-key="$GREEN_KEY" \
+  --from-literal=aws-access-key-id="$AKID" \
+  --from-literal=aws-secret-access-key="$ASEC" \
+  --from-literal=aws-region="us-east-1"
+
+kubectl create secret generic ai-mcp-credentials \
+  -n mainframe-modernization \
+  --from-literal=claude-api-key="$ANTH" \
+  --from-literal=nebius-api-key="$NEBIUS"
+
+kubectl rollout restart deployment -n mainframe-modernization
+sleep 90
+```
+
 # Create kind cluster + deploy everything
 ./deploy.sh
 
