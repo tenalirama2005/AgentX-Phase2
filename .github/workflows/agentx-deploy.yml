@@ -57,25 +57,28 @@ jobs:
           
       - name: Install Istio and Kiali
         continue-on-error: true
-        timeout-minutes: 60
+        timeout-minutes: 15
         run: |
-          curl -L https://istio.io/downloadIstio   | ISTIO_VERSION=1.29.1 sh -
+          curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.29.1 sh -
           export PATH=$PWD/istio-1.29.1/bin:$PATH
           echo "$PWD/istio-1.29.1/bin" >> $GITHUB_PATH
-          istioctl install --set profile=minimal --skip-confirmation \
-            --readiness-timeout 600s
+
+          istioctl install --set profile=minimal \
+            --skip-confirmation \
+            --set values.global.proxy.resources.requests.cpu=10m \
+            --set values.global.proxy.resources.requests.memory=40Mi \
+            --readiness-timeout 300s || true
+
           kubectl wait --for=condition=ready pod \
             -l app=istiod \
             -n istio-system \
-            --timeout=600s
-          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29.1/samples/addons/prometheus.yaml  
-          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29.1/samples/addons/kiali.yaml  
-          kubectl label namespace mainframe-modernization istio-injection=enabled --overwrite || true
-          kubectl apply -f - << 'AUTHEOF'
+            --timeout=300s || true
 
-          kubectl apply -f k8s/base/06-istio-authpolicy.yaml
-          echo "Istio + Kiali ready"
-          kubectl get pods -n istio-system
+          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29/samples/addons/prometheus.yaml || true
+          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29/samples/addons/kiali.yaml || true
+
+          echo "Istio install complete"
+          kubectl get pods -n istio-system || true
 
       - name: Create namespace
         run: |
@@ -110,11 +113,14 @@ jobs:
       - name: Apply Kubernetes manifests
         run: |
           kubectl apply -f k8s/base/00-namespace-rbac.yaml -n $NAMESPACE
+          kubectl label namespace $NAMESPACE istio-injection=enabled --overwrite || true
           kubectl apply -f k8s/base/02-agent-gateway.yaml -n $NAMESPACE
           kubectl apply -f k8s/base/03-agents.yaml -n $NAMESPACE
           kubectl apply -f k8s/base/04-network-policy.yaml -n $NAMESPACE
           kubectl apply -f k8s/base/05-mcp-servers.yaml -n $NAMESPACE
-
+          kubectl apply -f k8s/base/07-istio-network-policy.yaml -n $NAMESPACE || true
+          kubectl apply -f k8s/base/06-istio-authpolicy.yaml -n $NAMESPACE || true
+          
       - name: Wait for all pods to be ready
         continue-on-error: true
         run: |
