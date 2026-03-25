@@ -168,35 +168,59 @@ jobs:
           echo "================================================="
           echo " AgentX-Phase2 -- FBA Pipeline Test"
           echo "================================================="
-          RESULT=$(curl -s -X POST http://localhost:8080/modernize \
+          
+          # Wait for green-agent to be healthy
+          echo "Waiting for green-agent health..."
+          for i in $(seq 1 30); do
+            HEALTH=$(curl -s --max-time 5 http://localhost:8080/health | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+            if [ "$HEALTH" = "healthy" ] || [ "$HEALTH" = "degraded" ]; then
+              echo "Green-agent is ready!"
+              break
+            fi
+            echo "  Attempt $i: not ready yet, waiting 10s..."
+            sleep 10
+          done
+          
+          RESULT=$(curl -s --max-time 600 -X POST http://localhost:8080/modernize \
             -H "Content-Type: application/json" \
             -d '{"s3_key":"programs/interest_calc.cbl"}')
-          echo "$RESULT" | python3 -m json.tool
-          STATUS=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('fba_status',''))")
-          CONFIDENCE=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('fba_confidence',''))")
-          K_STAR=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('k_star',''))")
-          GUARANTEE=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('bayesian_guarantee',''))")
-          REVIEW=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('review_folder',''))")
+
+          if [ -z "$RESULT" ]; then
+            echo "ERROR: No response from green-agent"
+            kubectl logs -n $NAMESPACE \
+              $(kubectl get pod -n $NAMESPACE -l app=green-agent \
+              -o jsonpath='{.items[0].metadata.name}') --tail 20 || true
+            exit 1
+          fi
+
+          echo "$RESULT" | python3 -m json.tool || echo "$RESULT"
+          
+          STATUS=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('fba_status') or '')" 2>/dev/null)
+          CONFIDENCE=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('fba_confidence') or '')" 2>/dev/null)
+          K_STAR=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('k_star') or '')" 2>/dev/null)
+          GUARANTEE=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('bayesian_guarantee') or '')" 2>/dev/null)
+          REVIEW=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('review_folder') or '')" 2>/dev/null)
+
           echo "  Status    : $STATUS"
           echo "  Confidence: $CONFIDENCE"
-          echo "  k*        : $K_STAR nodes in consensus"
+          echo "  k*        : $K_STAR reasoning steps per model"
           echo "  Guarantee : $GUARANTEE"
           echo "  Paper     : arxiv:2507.11768"
-          if [ -n "$REVIEW" ]; then
-            REPORT=$(curl -s -X POST http://localhost:8082/fetch_source \
+
+          if [ -n "$REVIEW" ] && [ "$REVIEW" != "None" ]; then
+            REPORT=$(curl -s --max-time 30 -X POST http://localhost:8082/fetch_source \
               -H "Content-Type: application/json" \
               -H "X-AgentGateway-Token: agentx-internal-token" \
               -d "{\"bucket\":\"$S3_BUCKET\",\"key\":\"$REVIEW/fba_report/fba_report.json\"}")
-          
-          echo $REPORT | python3 scripts/print_fba_nodes.py
-
+            echo $REPORT | python3 scripts/print_fba_nodes.py || true
           fi
+
           if [ "$STATUS" != "CONSENSUS_REACHED" ]; then
-          echo "FAILED: No consensus reached"
+            echo "FAILED: No consensus reached — status: $STATUS"
             exit 1
           fi
           echo "PIPELINE TEST PASSED"
-
+          
       - name: Run Security Proof Test
         if: ${{ inputs.run_security == true }}
         run: |
