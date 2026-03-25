@@ -87,29 +87,32 @@ jobs:
       - name: Inject secrets
         run: |
           kubectl create secret generic gateway-jwt-secret \
-            --from-literal=jwt-secret=${{ secrets.GATEWAY_JWT_SECRET }} \
+            --from-literal=jwt-secret="${{ secrets.GATEWAY_JWT_SECRET }}" \
             -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
           kubectl create secret generic green-agent-credentials \
-            --from-literal=api-key=${{ secrets.GREEN_AGENT_API_KEY }} \
-            --from-literal=aws-access-key-id=${{ secrets.AWS_ACCESS_KEY_ID }} \
-            --from-literal=aws-secret-access-key=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
-            --from-literal=aws-region=${{ secrets.AWS_REGION }} \
+            --from-literal=api-key="${{ secrets.GREEN_AGENT_API_KEY }}" \
+            --from-literal=aws-access-key-id="${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            --from-literal=aws-secret-access-key="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            --from-literal=aws-region="${{ secrets.AWS_REGION }}" \
             -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
           kubectl create secret generic purple-agent-credentials \
-            --from-literal=api-key=${{ secrets.PURPLE_AGENT_API_KEY }} \
-            --from-literal=anthropic-api-key=${{ secrets.ANTHROPIC_API_KEY }} \
-            --from-literal=nebius-api-key=${{ secrets.NEBIUS_API_KEY }} \
+            --from-literal=api-key="${{ secrets.PURPLE_AGENT_API_KEY }}" \
+            --from-literal=anthropic-api-key="${{ secrets.ANTHROPIC_API_KEY }}" \
+            --from-literal=nebius-api-key="${{ secrets.NEBIUS_API_KEY }}" \
             -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
           kubectl create secret generic s3-mcp-credentials \
-            --from-literal=aws-access-key-id=${{ secrets.AWS_ACCESS_KEY_ID }} \
-            --from-literal=aws-secret-access-key=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
-            --from-literal=aws-region=${{ secrets.AWS_REGION }} \
+            --from-literal=aws-access-key-id="${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            --from-literal=aws-secret-access-key="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            --from-literal=aws-region="${{ secrets.AWS_REGION }}" \
             -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
           kubectl create secret generic ai-mcp-credentials \
-            --from-literal=claude-api-key=${{ secrets.ANTHROPIC_API_KEY }} \
-            --from-literal=nebius-api-key=${{ secrets.NEBIUS_API_KEY }} \
+            --from-literal=claude-api-key="${{ secrets.ANTHROPIC_API_KEY }}" \
+            --from-literal=nebius-api-key="${{ secrets.NEBIUS_API_KEY }}" \
             -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-
+          
+          echo "Verifying secrets:"
+          kubectl get secrets -n $NAMESPACE
+          
       - name: Apply Kubernetes manifests
         run: |
           kubectl apply -f k8s/base/00-namespace-rbac.yaml -n $NAMESPACE
