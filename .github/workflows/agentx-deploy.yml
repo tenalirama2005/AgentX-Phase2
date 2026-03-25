@@ -184,24 +184,6 @@ jobs:
           
           curl -s --max-time 10 http://localhost:8080/health | python3 -m json.tool || true
           
-      - name: Verify Nebius connectivity
-        continue-on-error: true
-        run: |
-          # Check Nebius key is set in pod
-          NEBIUS_CHECK=$(kubectl exec -n $NAMESPACE \
-            $(kubectl get pod -n $NAMESPACE -l app=purple-agent \
-            -o jsonpath='{.items[0].metadata.name}') \
-            -- env | grep "^NEBIUS_API_KEY=" | cut -d'=' -f2- | wc -c)
-          echo "Nebius key length: $NEBIUS_CHECK chars"
-          
-          # Test Nebius API directly from runner
-          NEBIUS_TEST=$(curl -s --max-time 10 \
-            -H "Authorization: Bearer ${{ secrets.NEBIUS_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            https://api.studio.nebius.ai/v1/models | \
-            python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Models available: {len(d.get(\"data\",[])})')" 2>/dev/null || echo "Nebius API unreachable")
-          echo "Nebius API: $NEBIUS_TEST"
-
       - name: Run FBA Pipeline Test
         if: ${{ github.event_name == 'push' || inputs.run_pipeline == true }}
         continue-on-error: true
