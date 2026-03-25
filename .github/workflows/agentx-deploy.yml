@@ -172,7 +172,7 @@ jobs:
           curl -s --max-time 10 http://localhost:8080/health | python3 -m json.tool || true
           
       - name: Run FBA Pipeline Test
-        if: ${{ inputs.run_pipeline == true }}
+        if: ${{ github.event_name == 'push' || inputs.run_pipeline == true }}
         run: |
           echo "================================================="
           echo " AgentX-Phase2 -- FBA Pipeline Test"
@@ -231,7 +231,7 @@ jobs:
           echo "PIPELINE TEST PASSED"
           
       - name: Run Security Proof Test
-        if: ${{ inputs.run_security == true }}
+        if: ${{ github.event_name == 'push' || inputs.run_security == true }}
         run: |
           echo "================================================="
           echo " AgentX-Phase2 -- Security Proof"
