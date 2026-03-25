@@ -51,8 +51,16 @@ jobs:
         run: |
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
           chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
-          printf "apiVersion: kind.x-k8s.io/v1alpha4\nkind: Cluster\nnodes:\n- role: control-plane\n" > /tmp/kind-config.yaml
-          kind create cluster --name $CLUSTER_NAME --config /tmp/kind-config.yaml --wait 60s
+          
+          # Check if cluster already exists
+          if kind get clusters 2>/dev/null | grep -q "^agentx-phase2$"; then
+            echo "Cluster already exists — connecting..."
+            kubectl config use-context kind-agentx-phase2
+          else
+            echo "Creating new cluster..."
+            printf "apiVersion: kind.x-k8s.io/v1alpha4\nkind: Cluster\nnodes:\n- role: control-plane\n" > /tmp/kind-config.yaml
+            kind create cluster --name $CLUSTER_NAME --config /tmp/kind-config.yaml --wait 60s
+          fi
           kubectl get nodes
           
       - name: Install Istio and Kiali
