@@ -110,6 +110,15 @@ jobs:
             --from-literal=nebius-api-key="${{ secrets.NEBIUS_API_KEY }}" \
             -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
           
+          # Create pipeline-config ConfigMap
+          kubectl create configmap pipeline-config \
+            --from-literal=aws-region="${{ secrets.AWS_REGION }}" \
+            --from-literal=claude-model="claude-opus-4-6" \
+            --from-literal=gateway-url="http://agent-gateway:8090" \
+            --from-literal=log-level="info" \
+            --from-literal=s3-bucket="${{ secrets.S3_BUCKET }}" \
+            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
           echo "Verifying secrets:"
           kubectl get secrets -n $NAMESPACE
           
