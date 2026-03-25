@@ -158,10 +158,15 @@ jobs:
 
       - name: Setup port-forwards
         run: |
+          # Kill any existing port-forwards
+          pkill -f "kubectl port-forward" 2>/dev/null || true
+          sleep 5
+          
           # Wait until pods are actually Running
           echo "Waiting for pods to be Running..."
           for i in $(seq 1 30); do
-            PENDING=$(kubectl get pods -n $NAMESPACE --no-headers | grep -c "Pending\|Init\|ContainerCreating" || true)
+            PENDING=$(kubectl get pods -n $NAMESPACE --no-headers | \
+              grep -c "Pending\|Init\|ContainerCreating" || true)
             if [ "$PENDING" = "0" ]; then
               echo "All pods running!"
               break
@@ -178,7 +183,7 @@ jobs:
           sleep 10
           
           curl -s --max-time 10 http://localhost:8080/health | python3 -m json.tool || true
-
+          
       - name: Verify Nebius connectivity
         continue-on-error: true
         run: |
