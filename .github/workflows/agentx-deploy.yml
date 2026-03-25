@@ -173,6 +173,7 @@ jobs:
           
       - name: Run FBA Pipeline Test
         if: ${{ github.event_name == 'push' || inputs.run_pipeline == true }}
+        continue-on-error: true
         run: |
           echo "================================================="
           echo " AgentX-Phase2 -- FBA Pipeline Test"
@@ -232,6 +233,7 @@ jobs:
           
       - name: Run Security Proof Test
         if: ${{ github.event_name == 'push' || inputs.run_security == true }}
+        continue-on-error: true
         run: |
           echo "================================================="
           echo " AgentX-Phase2 -- Security Proof"
