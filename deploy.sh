@@ -261,7 +261,55 @@ fi
 
 # ── TestSecurity ─────────────────────────────────────────────
 if [ "$TEST_SECURITY" = true ]; then
-    cyan "\n=================================================="
+    # Re-inject all secrets to ensure they are current
+    ENV_FILE="$SCRIPT_DIR/.env"
+    if [ -f "$ENV_FILE" ]; then
+        JWT=$(grep "^GATEWAY_JWT_SECRET" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')
+        ANTH=$(grep "^ANTHROPIC_API_KEY" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')
+        AKID=$(grep "^AWS_ACCESS_KEY_ID" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')
+        ASEC=$(grep "^AWS_SECRET_ACCESS_KEY" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')
+        NEBIUS=$(grep "^NEBIUS_API_KEY" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')
+        PURP_KEY=$(grep "^PURPLE_AGENT_API_KEY" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')
+        GREEN_KEY=$(grep "^GREEN_AGENT_API_KEY" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')
+        [ -z "$PURP_KEY" ] && PURP_KEY="purple-agent-dev-key"
+        [ -z "$GREEN_KEY" ] && GREEN_KEY="green-agent-dev-key"
+
+        kubectl delete secret gateway-jwt-secret purple-agent-credentials \
+            green-agent-credentials s3-mcp-credentials \
+            -n $NAMESPACE --ignore-not-found > /dev/null 2>&1
+
+        kubectl create secret generic gateway-jwt-secret \
+            -n $NAMESPACE \
+            --from-literal=jwt-secret="$JWT" \
+            --from-literal=secret="$JWT" > /dev/null 2>&1
+        kubectl create secret generic purple-agent-credentials \
+            -n $NAMESPACE \
+            --from-literal=api-key="$PURP_KEY" \
+            --from-literal=anthropic-api-key="$ANTH" \
+            --from-literal=nebius-api-key="$NEBIUS" > /dev/null 2>&1
+        kubectl create secret generic green-agent-credentials \
+            -n $NAMESPACE \
+            --from-literal=api-key="$GREEN_KEY" \
+            --from-literal=aws-access-key-id="$AKID" \
+            --from-literal=aws-secret-access-key="$ASEC" \
+            --from-literal=aws-region="us-east-1" > /dev/null 2>&1
+        kubectl create secret generic s3-mcp-credentials \
+            -n $NAMESPACE \
+            --from-literal=aws-access-key-id="$AKID" \
+            --from-literal=aws-secret-access-key="$ASEC" \
+            --from-literal=aws-region="us-east-1" > /dev/null 2>&1
+
+        kubectl rollout restart deployment/agent-gateway -n $NAMESPACE > /dev/null 2>&1
+        kubectl rollout status deployment/agent-gateway \
+            -n $NAMESPACE --timeout=60s > /dev/null 2>&1
+        pkill -f "port-forward svc/agent-gateway" 2>/dev/null || true
+        sleep 3
+        kubectl port-forward svc/agent-gateway 8090:8090 \
+            -n $NAMESPACE > /dev/null 2>&1 &
+        sleep 5
+    fi
+
+    cyan "\n=================================================="    
     cyan " AgentX-Phase2 -- Security Proof"
     cyan " kagent + AgentGateway + KRegistry"
     cyan "=================================================="
