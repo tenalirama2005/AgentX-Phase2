@@ -12,6 +12,14 @@
 
 ---
 
+## Demo Video
+
+[![AgentX-Phase2 Demo](https://img.youtube.com/vi/fXXyVwlup0Y/maxresdefault.jpg)](https://youtu.be/fXXyVwlup0Y)
+
+▶️ [Watch on YouTube](https://youtu.be/fXXyVwlup0Y) — 6:35 minutes
+
+
+
 ## What is AgentX-Phase2?
 
 AgentX-Phase2 is a **Kubernetes-native multi-agent pipeline** that modernizes 
@@ -134,6 +142,10 @@ kubectl create secret generic ai-mcp-credentials \
 kubectl rollout restart deployment -n mainframe-modernization
 sleep 90
 ```
+> **Note:** The GitHub Actions CI pipeline runs infrastructure tests 
+> (pod deployment, security proof). The full FBA pipeline with 31 AI 
+> models is best run locally due to GitHub Actions runner limitations.
+> Run `./deploy.sh --run-pipeline` locally for full results.
 
 # Create kind cluster + deploy everything
 ./deploy.sh
