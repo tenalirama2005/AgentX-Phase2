@@ -67,27 +67,39 @@ jobs:
         continue-on-error: true
         timeout-minutes: 15
         run: |
-          curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.29.1 sh -
+          curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.29.1 sh - 2>/dev/null || true
           export PATH=$PWD/istio-1.29.1/bin:$PATH
           echo "$PWD/istio-1.29.1/bin" >> $GITHUB_PATH
 
-          istioctl install --set profile=minimal \
-            --skip-confirmation \
-            --set values.global.proxy.resources.requests.cpu=10m \
-            --set values.global.proxy.resources.requests.memory=40Mi \
-            --readiness-timeout 300s || true
+          # Check if Istio is already installed
+          if kubectl get namespace istio-system > /dev/null 2>&1; then
+            echo "Istio already installed — skipping installation"
+            kubectl get pods -n istio-system
+          else
+            echo "Installing Istio..."
+            istioctl install --set profile=minimal \
+              --skip-confirmation \
+              --set values.global.proxy.resources.requests.cpu=10m \
+              --set values.global.proxy.resources.requests.memory=40Mi \
+              --readiness-timeout 300s || true
 
-          kubectl wait --for=condition=ready pod \
-            -l app=istiod \
-            -n istio-system \
-            --timeout=300s || true
+            kubectl wait --for=condition=ready pod \
+              -l app=istiod \
+              -n istio-system \
+              --timeout=300s || true
 
-          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29/samples/addons/prometheus.yaml || true
-          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29/samples/addons/kiali.yaml || true
+            kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29/samples/addons/prometheus.yaml || true
+            kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29/samples/addons/kiali.yaml || true
+          fi
 
-          echo "Istio install complete"
+          kubectl label namespace mainframe-modernization \
+            istio-injection=enabled --overwrite || true
+          kubectl apply -f k8s/base/07-istio-network-policy.yaml || true
+          kubectl apply -f k8s/base/06-istio-authpolicy.yaml || true
+
+          echo "Istio setup complete"
           kubectl get pods -n istio-system || true
-
+          
       - name: Create namespace
         run: |
           kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
@@ -190,6 +202,65 @@ jobs:
 
           curl -s --max-time 10 http://localhost:8080/health | python3 -m json.tool || true
               
+      - name: Re-inject credentials before pipeline
+        run: |
+          # Re-inject all secrets from GitHub Secrets
+          kubectl delete secret purple-agent-credentials \
+            green-agent-credentials s3-mcp-credentials \
+            ai-mcp-credentials gateway-jwt-secret \
+            -n $NAMESPACE --ignore-not-found > /dev/null 2>&1
+
+          kubectl create secret generic gateway-jwt-secret \
+            --from-literal=jwt-secret="${{ secrets.GATEWAY_JWT_SECRET }}" \
+            --from-literal=secret="${{ secrets.GATEWAY_JWT_SECRET }}" \
+            -n $NAMESPACE
+          kubectl create secret generic purple-agent-credentials \
+            --from-literal=api-key="${{ secrets.PURPLE_AGENT_API_KEY }}" \
+            --from-literal=anthropic-api-key="${{ secrets.ANTHROPIC_API_KEY }}" \
+            --from-literal=nebius-api-key="${{ secrets.NEBIUS_API_KEY }}" \
+            -n $NAMESPACE
+          kubectl create secret generic green-agent-credentials \
+            --from-literal=api-key="${{ secrets.GREEN_AGENT_API_KEY }}" \
+            --from-literal=aws-access-key-id="${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            --from-literal=aws-secret-access-key="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            --from-literal=aws-region="${{ secrets.AWS_REGION }}" \
+            -n $NAMESPACE
+          kubectl create secret generic s3-mcp-credentials \
+            --from-literal=aws-access-key-id="${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            --from-literal=aws-secret-access-key="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            --from-literal=aws-region="${{ secrets.AWS_REGION }}" \
+            -n $NAMESPACE
+          kubectl create secret generic ai-mcp-credentials \
+            --from-literal=claude-api-key="${{ secrets.ANTHROPIC_API_KEY }}" \
+            --from-literal=nebius-api-key="${{ secrets.NEBIUS_API_KEY }}" \
+            -n $NAMESPACE
+
+          # Restart deployments to pick up new secrets
+          kubectl rollout restart deployment/purple-agent \
+            deployment/green-agent deployment/s3-mcp \
+            deployment/agent-gateway -n $NAMESPACE
+          
+          kubectl rollout status deployment/purple-agent \
+            -n $NAMESPACE --timeout=120s
+          kubectl rollout status deployment/green-agent \
+            -n $NAMESPACE --timeout=120s
+          kubectl rollout status deployment/s3-mcp \
+            -n $NAMESPACE --timeout=120s
+          kubectl rollout status deployment/agent-gateway \
+            -n $NAMESPACE --timeout=120s
+
+          # Restart port-forwards after pod restart
+          pkill -9 -f "kubectl port-forward" 2>/dev/null || true
+          fuser -k 8080/tcp 2>/dev/null || true
+          fuser -k 8082/tcp 2>/dev/null || true
+          fuser -k 8090/tcp 2>/dev/null || true
+          sleep 5
+          kubectl port-forward svc/green-agent   8080:8080 -n $NAMESPACE > /dev/null 2>&1 &
+          kubectl port-forward svc/s3-mcp        8082:8081 -n $NAMESPACE > /dev/null 2>&1 &
+          kubectl port-forward svc/agent-gateway 8090:8090 -n $NAMESPACE > /dev/null 2>&1 &
+          sleep 10
+          echo "Credentials re-injected and pods restarted ✓"
+      
       - name: Run FBA Pipeline Test
         if: ${{ github.event_name == 'push' || inputs.run_pipeline == true }}
         continue-on-error: true
@@ -209,25 +280,17 @@ jobs:
             echo "  Attempt $i: not ready yet, waiting 10s..."
             sleep 10
           done
-
-          # Retry pipeline up to 3 times
+          
+          # Single pipeline run
           RESULT=""
-          for attempt in 1 2 3; do
-            echo "Pipeline attempt $attempt of 3..."
-            RESULT=$(curl -s --max-time 600 -X POST http://localhost:8080/modernize \
-              -H "Content-Type: application/json" \
-              -d '{"s3_key":"programs/interest_calc.cbl"}')
-            STATUS=$(echo $RESULT | python3 -c \
-              "import sys,json; d=json.load(sys.stdin); print(d.get('fba_status') or '')" 2>/dev/null)
-            if [ "$STATUS" = "CONSENSUS_REACHED" ]; then
-              echo "CONSENSUS_REACHED on attempt $attempt!"
-              break
-            fi
-            echo "Attempt $attempt: $STATUS — retrying..."
-            sleep 30
-          done
+          echo "Running pipeline..."
+          RESULT=$(curl -s --max-time 600 -X POST http://localhost:8080/modernize \
+            -H "Content-Type: application/json" \
+            -d '{"s3_key":"programs/interest_calc.cbl"}')
+          STATUS=$(echo $RESULT | python3 -c \
+            "import sys,json; d=json.load(sys.stdin); print(d.get('fba_status') or '')" 2>/dev/null)
 
-          # Check final result
+          # Check result
           if [ -z "$RESULT" ]; then
             echo "ERROR: No response from green-agent"
             kubectl logs -n $NAMESPACE \
@@ -260,7 +323,7 @@ jobs:
           if [ "$STATUS" = "CONSENSUS_REACHED" ]; then
             echo "PIPELINE TEST PASSED"
           else
-            echo "WARNING: $STATUS after 3 attempts — Nebius API may be slow"
+            echo "WARNING: $STATUS — Nebius API may be slow on this run"
             echo "Run ./deploy.sh --run-pipeline locally for full results"
           fi
           
