@@ -206,17 +206,23 @@ sleep 90
 ```bash
 ./deploy.sh --run-pipeline
 ```
-
 ### Sample Output
 ```
-  Model                            Conf  Bar
-  ---------------------------------------------------------
-  [01] glm_4_7_fp8                  98%  |████████████████████████| [OK]
-  [02] deepseek_r1_0528             98%  |████████████████████████| [OK]
-  [03] llama_3_1_8b_fast            95%  |███████████████████████░| [OK]
+ Model                          Conf  Bar (25 chars = 100%)     Status
+  ====================================================================
+  [01] glm_4_7_fp8                98%  [########################.] OK
+  [02] deepseek_r1_0528           98%  [########################.] OK
+  [03] llama_3_1_8b_fast          95%  [#######################..] OK
+  [04] qwen2_5_coder_7b           95%  [#######################..] OK
+  [05] deepseek_v3_2              95%  [#######################..] OK
+  [06] gemma3_27b                 95%  [#######################..] OK
+  [07] glm_4_5                    95%  [#######################..] OK
+  [08] nemotron_nano_30b          95%  [#######################..] OK
+  [09] deepseek_v3_0324           95%  [#######################..] OK
+  [10] qwen3_30b                  95%  [#######################..] OK
   ...
-  [27] nemotron_nano_12b            80%  |████████████████████░░░░| [WARN]
-  ---------------------------------------------------------
+  [28] nemotron_nano_12b          85%  [#####################....] OK
+  ====================================================================
 
   Status    : CONSENSUS_REACHED
   Confidence: 0.9327429562161073
@@ -270,12 +276,12 @@ COBOL file with more/fewer lines is processed.
 **31 models × 89 reasoning steps = 2,759 total verified reasoning steps** 
 per pipeline run.
 
-### Colour Bar Legend
-| Colour | Threshold | Status |
-|--------|-----------|--------|
-| 🟡 Yellow | ≥ 85% | [OK] — model in consensus |
-| 🔵 Blue | ≥ 70% | [WARN] — borderline |
-| 🔴 Red | < 70% | [LOW] — below threshold |
+### Bar Chart Legend
+| Status | Threshold | Description |
+|--------|-----------|-------------|
+| [OK]   | ≥ 85% | Model in consensus |
+| [WARN] | ≥ 70% | Borderline |
+| [LOW]  | < 70% | Below threshold |
 
 ---
 
@@ -347,6 +353,48 @@ per pipeline run.
 ---
 
 ## GitHub Actions CI/CD
+
+### Self-Hosted Runner (WSL2)
+
+The GitHub Actions CI pipeline runs on a **self-hosted runner** on WSL2 Ubuntu 24.04 
+rather than GitHub's default hosted runners. This is required because:
+
+1. **Nebius API Access** — The FBA pipeline calls 30 Nebius AI models. GitHub's 
+   hosted runners cannot reach `api.studio.nebius.ai` due to network restrictions.
+
+2. **kind Cluster Reuse** — The self-hosted runner reuses the existing 
+   `agentx-phase2` kind cluster, avoiding 10+ minute cluster creation on every run.
+
+3. **Full 31-Model Consensus** — GitHub hosted runners only reach claude_opus_4_6 
+   (1 model). The self-hosted runner achieves full 31-model FBA consensus with 
+   93%+ confidence.
+
+### Setting Up the Self-Hosted Runner
+```bash
+useradd -m -s /bin/bash agentx
+echo "agentx ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+su - agentx
+mkdir ~/actions-runner && cd ~/actions-runner
+curl -o actions-runner-linux-x64.tar.gz -L \
+  https://github.com/actions/runner/releases/download/v2.333.0/actions-runner-linux-x64-2.333.0.tar.gz
+tar xzf ./actions-runner-linux-x64.tar.gz
+./config.sh --url https://github.com/tenalirama2005/AgentX-Phase2 \
+  --token YOUR_TOKEN_HERE \
+  --name "WSL2-AgentX" \
+  --labels "self-hosted,linux,nebius-capable"
+./run.sh
+```
+
+### What CI Tests Run
+| Test | Description | Status |
+|------|-------------|--------|
+| Deploy | kind cluster + Istio + all pods 2/2 | ✅ |
+| Security | 4 zero-trust JWT+RBAC tests | ✅ |
+| Pipeline | 31-model FBA consensus | ✅ |
+
+> **Note:** Keep WSL2 running with `./run.sh` active for CI to work on every push.
+
+### Trigger Pipeline Manually
 ```bash
 # Trigger deployment pipeline
 gh workflow run agentx-deploy.yml \
