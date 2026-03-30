@@ -14,9 +14,11 @@
 
 ## Demo Video
 
-[![AgentX-Phase2 Demo](https://img.youtube.com/vi/fXXyVwlup0Y/maxresdefault.jpg)](https://youtu.be/fXXyVwlup0Y)
+[![AgentX-Phase2 Demo](https://img.youtube.com/vi/k4Xzbp-M2fc/maxresdefault.jpg)](https://youtu.be/k4Xzbp-M2fc)
 
-▶️ [Watch on YouTube](https://youtu.be/fXXyVwlup0Y) — 6:35 minutes
+*Click to watch: AgentX-Phase2 Live Demo — 49-Model FBA Consensus COBOL to Rust*
+
+▶️ [Watch on YouTube](https://youtu.be/k4Xzbp-M2fc) — 4:44 minutes
 
 
 
