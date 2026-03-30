@@ -1,11 +1,11 @@
-/// consensus.rs — 31-Node Dynamic FBA Consensus Engine
+/// consensus.rs — 49-Node Dynamic FBA Consensus Engine
 /// Loads model config from models.toml at startup
-/// Runs all 31 LLM calls CONCURRENTLY via tokio::join_all
-/// Applies 2/3 quorum (≥21/31) via FbaNetwork with dynamic QuorumSlices
+/// Runs all 49 LLM calls CONCURRENTLY via tokio::join_all
+/// Applies 2/3 quorum (≥33/49) via FbaNetwork with dynamic QuorumSlices
 ///
 /// Flow:
 ///   1. Load ModelConfig list from models.toml
-///   2. Spawn all 31 model calls concurrently
+///   2. Spawn all 49 model calls concurrently
 ///   3. Collect results — failed nodes skipped gracefully
 ///   4. Apply FBA quorum intersection (need ≥ 2/3 of responding nodes)
 ///   5. Return FbaResult with consensus Rust code + full per-node report
@@ -103,7 +103,7 @@ pub struct AppState {
 
 // ─── Main Entry Point ─────────────────────────────────────────────────────────
 
-/// Run all 31 models concurrently, apply FBA quorum, return consensus result.
+/// Run all 49 models concurrently, apply FBA quorum, return consensus result.
 pub async fn run_consensus(state: &AppState, cobol_source: &str) -> FbaResult {
     let bayesian_result = compute_bayesian(cobol_source);
     let k_star = bayesian_result.k_star;
@@ -111,7 +111,7 @@ pub async fn run_consensus(state: &AppState, cobol_source: &str) -> FbaResult {
     let quorum_needed = state.config.quorum_size();
 
     info!(
-        "🚀 Starting 31-node FBA consensus | k*={} | quorum={}/{} | sim={:.2} | conf={:.2}",
+        "🚀 Starting 49-node FBA consensus | k*={} | quorum={}/{} | sim={:.2} | conf={:.2}",
         k_star,
         quorum_needed,
         n_models,
@@ -260,24 +260,24 @@ mod tests {
     }
 
     #[test]
-    fn test_quorum_size_31_nodes() {
-        let cfg = make_test_config(31);
-        // ceil(31 * 0.667) = ceil(20.677) = 21
-        assert_eq!(cfg.quorum_size(), 21);
+    fn test_quorum_size_49_nodes() {
+        let cfg = make_test_config(49);
+        // ceil(49 * 0.667) = ceil(32.683) = 33
+        assert_eq!(cfg.quorum_size(), 33);
     }
 
     #[test]
     fn test_quorum_size_3_nodes() {
         let cfg = make_test_config(3);
         // ceil(3 * 0.667) = ceil(2.001) = 3 — but FbaNetwork handles 2/3
-        assert_eq!(cfg.quorum_size(), 2);
+        assert_eq!(cfg.quorum_size(), 3);
     }
 
     #[test]
     fn test_quorum_size_with_failures() {
-        let cfg = make_test_config(31);
-        // Even with 10 failures, 21 remaining still meets quorum
-        let responding = 31 - 10;
+        let cfg = make_test_config(49);
+        // Even with 10 failures, 39 remaining still meets quorum
+        let responding = 49 - 10;
         assert!(responding >= cfg.quorum_size());
     }
 

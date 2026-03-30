@@ -1,5 +1,5 @@
 # AgentX-Phase2 — Mainframe Modernization Pipeline
-### FBA 31-Node Consensus | Zero-Trust Security | Kubernetes + Istio + Kiali
+### FBA 49-Node Consensus | Zero-Trust Security | Kubernetes + Istio + Kiali
 **AgentX - AgentBeats Competition | Phase 2 Sprint 1 | Business Process Agent Track**
 
 [![CI](https://github.com/tenalirama2005/AgentX-Phase2/actions/workflows/agentx-deploy.yml/badge.svg)](https://github.com/tenalirama2005/AgentX-Phase2/actions/workflows/agentx-deploy.yml)
@@ -23,10 +23,10 @@
 ## What is AgentX-Phase2?
 
 AgentX-Phase2 is a **Kubernetes-native multi-agent pipeline** that modernizes 
-legacy COBOL mainframe code into production-ready Rust using **31 AI models 
+legacy COBOL mainframe code into production-ready Rust using **49 AI models 
 voting in parallel** with Federated Byzantine Agreement (FBA) consensus.
 ```
-COBOL Source → S3 → Green Agent → Purple Agent (31 FBA nodes) → Rust Output → S3
+COBOL Source → S3 → Green Agent → Purple Agent (49 FBA nodes) → Rust Output → S3
 ```
 
 Every MCP call is enforced through **AgentGateway** with JWT + RBAC zero-trust 
@@ -43,7 +43,7 @@ security, backed by **Istio service mesh** with **Kiali** visual proof.
 │      │               │              │                   │
 │      └──→ purple_agent    cobol_mcp rust_mcp ai_mcp    │
 │              │                                          │
-│         31 FBA nodes                                    │
+│         49 FBA nodes                                    │
 │    (Nebius + Anthropic Claude)                          │
 └─────────────────────────────────────────────────────────┘
          │
@@ -56,7 +56,7 @@ security, backed by **Istio service mesh** with **Kiali** visual proof.
 | Agent | Role | Technology |
 |-------|------|------------|
 | 🟢 **green_agent** | Orchestrator — sets tasks, evaluates results | Rust + Actix-web |
-| 🟣 **purple_agent** | Participant — 31-node FBA consensus engine | Rust + Actix-web |
+| 🟣 **purple_agent** | Participant — 49-node FBA consensus engine | Rust + Actix-web |
 
 ### MCP Servers
 | Server | Purpose | Port |
@@ -143,14 +143,14 @@ kubectl rollout restart deployment -n mainframe-modernization
 sleep 90
 ```
 > **Note:** The GitHub Actions CI pipeline runs infrastructure tests 
-> (pod deployment, security proof). The full FBA pipeline with 31 AI 
+> (pod deployment, security proof). The full FBA pipeline with 49 AI 
 > models is best run locally due to GitHub Actions runner limitations.
 > Run `./deploy.sh --run-pipeline` locally for full results.
 
 # Create kind cluster + deploy everything
 ./deploy.sh
 
-# Run COBOL → Rust pipeline with 31-node FBA consensus
+# Run COBOL → Rust pipeline with 49-node FBA consensus
 ./deploy.sh --run-pipeline
 
 # Prove zero-trust security
@@ -273,7 +273,7 @@ Where:
 **k* = 89 is fixed** for `interest_calc.cbl` — it changes only if a different 
 COBOL file with more/fewer lines is processed.
 
-**31 models × 89 reasoning steps = 2,759 total verified reasoning steps** 
+**49 models × 89 reasoning steps = 4,361 total verified reasoning steps** 
 per pipeline run.
 
 ### Bar Chart Legend
@@ -301,47 +301,83 @@ per pipeline run.
 
 ---
 
-## AI Models (31 Nodes)
+## AI Models (49 Nodes)
 
-### Tier 1 — Large Models (8192 tokens)
+**1 Anchor Model + 48 Nebius Models** voting in parallel via FBA consensus.
+
+### Anchor Model
+| Model | Provider | Tokens |
+|-------|----------|--------|
+| Claude Opus 4.6 | Anthropic | 8192 |
+
+### Tier 1 — Large Frontier Models (8192 tokens)
 | Model | Provider |
 |-------|---------|
-| claude_opus_4_6 | Anthropic |
-| deepseek_v3_2 | Nebius |
-| deepseek_r1_0528 | Nebius |
-| qwen3_235b | Nebius |
-| qwen3_235b_thinking | Nebius |
-| qwen3_coder_480b | Nebius |
-| hermes4_405b | Nebius |
-| llama_nemotron_253b | Nebius |
-| kimi_k2 | Nebius |
-| kimi_k2_5 | Nebius |
-| glm_4_5 | Nebius |
-| gpt_oss_120b | Nebius |
+| DeepSeek-V3.2 | Nebius |
+| DeepSeek-V3-0324 | Nebius |
+| DeepSeek-R1-0528 | Nebius |
+| DeepSeek-R1-0528-fast | Nebius |
+| Llama-3.3-70B-Instruct | Nebius |
+| Llama-3.3-70B-Instruct-fast | Nebius |
+| Llama-3.1-Nemotron-Ultra-253B | Nebius |
+| Qwen3-235B-A22B-Instruct | Nebius |
+| Qwen3-235B-A22B-Thinking | Nebius |
+| Qwen3-235B-A22B-Thinking-fast | Nebius |
+| Qwen3-Coder-480B-A35B | Nebius |
+| Qwen3-Next-80B-Thinking | Nebius |
+| Qwen3.5-397B | Nebius |
+| Hermes-4-405B | Nebius |
+| Kimi-K2-Instruct | Nebius |
+| Kimi-K2-Thinking | Nebius |
+| Kimi-K2.5 | Nebius |
+| MiniMax-M2.1 | Nebius |
+| MiniMax-M2.5 | Nebius |
+| GLM-4.5 | Nebius |
+| GLM-5 | Nebius |
+| GPT-OSS-120B | Nebius |
+| GPT-OSS-120B-fast | Nebius |
+| Nemotron-3-Super-120B | Nebius |
 
 ### Tier 2 — Medium Models (4096 tokens)
 | Model | Provider |
 |-------|---------|
-| qwen3_32b | Nebius |
-| qwen3_30b | Nebius |
-| qwen3_coder_30b | Nebius |
-| hermes4_70b | Nebius |
-| minimax_m2_1 | Nebius |
-| gemma3_27b | Nebius |
-| intellect3_106b | Nebius |
-| glm_4_5_air | Nebius |
-| glm_4_7_fp8 | Nebius |
-| nemotron_nano_30b | Nebius |
-| gpt_oss_20b | Nebius |
+| DeepSeek-V3.2-fast | Nebius |
+| DeepSeek-V3-0324-fast | Nebius |
+| Llama-3.3-70B-Instruct (alt) | Nebius |
+| Qwen3-32B | Nebius |
+| Qwen3-32B-fast | Nebius |
+| Qwen3-30B-A3B-Instruct | Nebius |
+| Qwen3-Coder-30B-A3B | Nebius |
+| Qwen3-Next-80B-Thinking-fast | Nebius |
+| Qwen3.5-397B-fast | Nebius |
+| Hermes-4-70B | Nebius |
+| INTELLECT-3-106B | Nebius |
+| Kimi-K2.5-fast | Nebius |
+| GLM-4.5-Air | Nebius |
+| GLM-4.7-FP8 | Nebius |
+| Gemma-3-27B-IT | Nebius |
+| Gemma-3-27B-IT-fast | Nebius |
+| NVIDIA-Nemotron-Nano-30B | Nebius |
+| GPT-OSS-20B | Nebius |
 
 ### Tier 3 — Fast Models (2048 tokens)
 | Model | Provider |
 |-------|---------|
-| llama_3_1_8b | Nebius |
-| llama_3_1_8b_fast | Nebius |
-| nemotron_nano_12b | Nebius |
-| qwen2_5_coder_7b | Nebius |
-| gemma2_9b | Nebius |
+| Meta-Llama-3.1-8B-Instruct | Nebius |
+| Meta-Llama-3.1-8B-Instruct-fast | Nebius |
+| Nemotron-Nano-V2-12B | Nebius |
+| Qwen2.5-Coder-7B | Nebius |
+| Gemma-2-9B-IT-fast | Nebius |
+| Gemma-2-2B-IT | Nebius |
+
+### Summary
+| Tier | Count | Description |
+|------|-------|-------------|
+| Anchor | 1 | Claude Opus 4.6 (Anthropic) |
+| Tier 1 | 24 | Large frontier models ≥70B |
+| Tier 2 | 18 | Medium models 20B-70B |
+| Tier 3 | 6 | Fast small models <20B |
+| **Total** | **49** | **1 Anthropic + 48 Nebius** |
 
 ---
 
@@ -354,49 +390,20 @@ per pipeline run.
 
 ## GitHub Actions CI/CD
 
-### Self-Hosted Runner (WSL2)
-
-The GitHub Actions CI pipeline runs on a **self-hosted runner** on WSL2 Ubuntu 24.04 
-rather than GitHub's default hosted runners. This is required because:
-
-1. **Nebius API Access** — The FBA pipeline calls 30 Nebius AI models. GitHub's 
-   hosted runners cannot reach `api.studio.nebius.ai` due to network restrictions.
-
-2. **kind Cluster Reuse** — The self-hosted runner reuses the existing 
-   `agentx-phase2` kind cluster, avoiding 10+ minute cluster creation on every run.
-
-3. **Full 31-Model Consensus** — GitHub hosted runners only reach claude_opus_4_6 
-   (1 model). The self-hosted runner achieves full 31-model FBA consensus with 
-   93%+ confidence.
-
-### Setting Up the Self-Hosted Runner
-```bash
-useradd -m -s /bin/bash agentx
-echo "agentx ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-su - agentx
-mkdir ~/actions-runner && cd ~/actions-runner
-curl -o actions-runner-linux-x64.tar.gz -L \
-  https://github.com/actions/runner/releases/download/v2.333.0/actions-runner-linux-x64-2.333.0.tar.gz
-tar xzf ./actions-runner-linux-x64.tar.gz
-./config.sh --url https://github.com/tenalirama2005/AgentX-Phase2 \
-  --token YOUR_TOKEN_HERE \
-  --name "WSL2-AgentX" \
-  --labels "self-hosted,linux,nebius-capable"
-./run.sh
-```
-
 ### What CI Tests Run
 | Test | Description | Status |
 |------|-------------|--------|
 | Deploy | kind cluster + Istio + all pods 2/2 | ✅ |
 | Security | 4 zero-trust JWT+RBAC tests | ✅ |
-| Pipeline | 31-model FBA consensus | ✅ |
-
-> **Note:** Keep WSL2 running with `./run.sh` active for CI to work on every push.
+| Pipeline | 49-model FBA consensus | ✅ |
 
 ### Trigger Pipeline Manually
 ```bash
-# Trigger deployment pipeline
+# Install gh CLI
+sudo apt install gh -y
+gh auth login
+
+# Trigger deployment pipeline manually
 gh workflow run agentx-deploy.yml \
   --repo tenalirama2005/AgentX-Phase2 \
   --field run_pipeline=true \
@@ -404,6 +411,10 @@ gh workflow run agentx-deploy.yml \
 
 # Watch live
 gh run watch --repo tenalirama2005/AgentX-Phase2
+```
+
+> **Note:** Pipeline also triggers automatically on every `git push` to main branch.
+> GitHub Pro runners are used — no self-hosted runner required.
 ```
 
 ---
@@ -421,7 +432,7 @@ correctness is actively being verified against the FBA theorem.
 
 ## Author
 
-**Venkat Nagala** | For the Cloud By the Cloud
+**Venkateshwar Rao Nagala** | For the Cloud By the Cloud
 - GitHub: [@tenalirama2005](https://github.com/tenalirama2005)
 - Docker Hub: [tenalirama2026](https://hub.docker.com/u/tenalirama2026)
 

@@ -156,32 +156,22 @@ jobs:
       - name: Wait for all pods to be ready
         continue-on-error: true
         run: |
-          echo "Waiting 120s for images to pull..."
-          sleep 120
-          kubectl get pods -n $NAMESPACE
-          
           for d in agent-gateway s3-mcp cobol-mcp ai-mcp rust-mcp purple-agent green-agent; do
             echo "Waiting: $d..."
             kubectl rollout status deployment/$d -n $NAMESPACE --timeout=600s || true
           done
-          
           echo "Final pod status:"
           kubectl get pods -n $NAMESPACE
 
       - name: Setup port-forwards
         run: |
-          # Kill ALL existing port-forwards aggressively
+          # Kill existing port-forwards
           pkill -9 -f "kubectl port-forward" 2>/dev/null || true
-          sleep 5
-          
-          # Also free ports directly
           fuser -k 8080/tcp 2>/dev/null || true
           fuser -k 8082/tcp 2>/dev/null || true
           fuser -k 8090/tcp 2>/dev/null || true
-          sleep 3
-          
-          # Wait until pods are actually Running
-          echo "Waiting for pods to be Running..."
+
+          # Wait until pods are Running
           for i in $(seq 1 30); do
             PENDING=$(kubectl get pods -n $NAMESPACE --no-headers | \
               grep -c "Pending\|Init\|ContainerCreating" || true)
@@ -194,12 +184,10 @@ jobs:
           done
 
           kubectl get pods -n $NAMESPACE
-
           kubectl port-forward svc/green-agent   8080:8080 -n $NAMESPACE > /dev/null 2>&1 &
           kubectl port-forward svc/s3-mcp        8082:8081 -n $NAMESPACE > /dev/null 2>&1 &
           kubectl port-forward svc/agent-gateway 8090:8090 -n $NAMESPACE > /dev/null 2>&1 &
-          sleep 10
-
+          sleep 5
           curl -s --max-time 10 http://localhost:8080/health | python3 -m json.tool || true
                         
       - name: Run FBA Pipeline Test

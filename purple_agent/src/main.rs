@@ -1,5 +1,5 @@
 // purple_agent/src/main.rs — v0.4.0
-// Wires run_consensus() into the /review handler (31-node FBA)
+// Wires run_consensus() into the /review handler (49-node FBA)
 // Web framework: actix-web 4
 
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
@@ -68,7 +68,7 @@ async fn review_handler(
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    info!(review_id = %review_id, "Received request — starting 31-node consensus");
+    info!(review_id = %review_id, "Received request — starting 49-node consensus");
 
     let fba_result = run_consensus(&state.inner, &req.cobol_source).await;
 
